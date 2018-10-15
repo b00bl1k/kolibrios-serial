@@ -937,7 +937,6 @@ include "detect/vortex86.inc"                     ; Vortex86 SoC detection code
 
         call    stack_init
         call    fdc_init
-        call    serial_init
 
 ; PALETTE FOR 320x200 and 640x480 16 col
 
@@ -970,6 +969,8 @@ include "detect/vortex86.inc"                     ; Vortex86 SoC detection code
                 [SLOT_BASE+256+APPDATA.io_map], PG_READ
         stdcall map_page, tss._io_map_1, \
                 [SLOT_BASE+256+APPDATA.io_map+4], PG_READ
+
+        call    serial_init
 
 ; SET KEYBOARD PARAMETERS
         mov     al, 0xf6       ; reset keyboard, scan enabled
@@ -4119,7 +4120,6 @@ set_io_access_rights:
 ;    0..0x2d, 0x30..0x4d, 0x50..0xdf, 0xe5..0xff (include last number of port).
 ;destroys eax,ebx, ebp
 r_f_port_area:
-
         test    ebx, ebx
         jnz     free_port_area
 ;     je    r_port_area

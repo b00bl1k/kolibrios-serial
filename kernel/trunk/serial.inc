@@ -41,7 +41,7 @@ serial_init:
         stdcall get_service, serial_drv_name
         test    eax, eax
         jnz     .fail
-        DEBUGF  1, " K : Serial driver is not loaded\n"
+        DEBUGF  1, "K : Serial driver is not loaded\n"
 .fail:
         ret
 

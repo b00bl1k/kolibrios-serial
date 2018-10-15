@@ -8,8 +8,11 @@
 format PE DLL native 0.05
 entry START
 
+L_DBG = 1
+L_ERR = 2
+
 __DEBUG__ = 1
-__DEBUG_LEVEL__ = 1
+__DEBUG_LEVEL__ = L_DBG
 API_VERSION = 1
 
 section '.flat' readable writable executable
@@ -51,6 +54,22 @@ proc service_proc stdcall, ioctl:dword
 
 .err:
         or      eax, -1
+        ret
+endp
+
+proc add_port uses ebx, io_addr:dword
+        DEBUGF  L_DBG, "K : Found serial port 0x%x\n", [io_addr]
+        xor     ebx, ebx
+        mov     ecx, [io_addr]
+        lea     edx, [ecx + 7]
+        push    ebp edi
+        invoke  ReservePortArea
+        pop     edi ebp
+        test    eax, eax
+        jz      @f
+        DEBUGF  L_ERR, "K : Failed to reserve port\n"
+        ret
+@@:
         ret
 endp
 
@@ -97,27 +116,27 @@ detect:
         call    uart_test
         test    eax, eax
         jz      @f
-        DEBUGF  1, " K : Found COM1\n"
+        stdcall add_port, 0x3F8
 @@:
         mov     edx, 0x2F8
         call    uart_test
         test    eax, eax
         jz      @f
-        DEBUGF  1, " K : Found COM2\n"
+        stdcall add_port, 0x2F8
 @@:
         mov     edx, 0x3E8
         call    uart_test
         test    eax, eax
         jz      @f
-        DEBUGF  1, " K : Found COM3\n"
+        stdcall add_port, 0x3E8
 @@:
         mov     edx, 0x2E8
         call    uart_test
         test    eax, eax
         jz      @f
-        DEBUGF  1, " K : Found COM4\n"
+        stdcall add_port, 0x2E8
 @@:
-        DEBUGF  1, " K : Serial ports scan completed\n"
+        DEBUGF  L_DBG, "K : Serial ports scan completed\n"
         ret
 
 
