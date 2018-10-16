@@ -5,19 +5,16 @@
 ;;                                                              ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-SERIAL_PORTS_MAX = 256
+SERIAL_PORTS_MAX = 64
 
 struct serial_port
-next                dd ?
-prev                dd ?
-driver              dd ?
-status              dd ?
-pid                 dd ?
+        status          dd ? ; port status bit field
+        pid             dd ? ; who currently accesseing to port
 ends
 
 uglobal
 align 4
-serial_ports        dd ?
+serial_ports        rd SERIAL_PORTS_MAX
 endg
 
 iglobal
@@ -27,16 +24,6 @@ endg
 
 align 4
 serial_init:
-        ; alloc memory for ports list
-        stdcall kernel_alloc, SERIAL_PORTS_MAX * 4
-        mov     [serial_ports], eax
-        test    eax, eax
-        jz      .fail
-        ; clear memory
-        mov     ecx, SERIAL_PORTS_MAX
-        mov     edi, eax
-        cld
-        rep stosd
         ; try to load std serial port driver
         stdcall get_service, serial_drv_name
         test    eax, eax
@@ -45,12 +32,31 @@ serial_init:
 .fail:
         ret
 
-; __stdcall u32 SerialAddPort(SERIAL_DEVICE * device);
-proc serial_add_port stdcall, device:dword
+; __stdcall u32 SerialAddPort(struct serial_port * port);
+; return 0 if ok, otherwise err code
+proc serial_add_port stdcall, port:dword
+        ; find free slot
+        xor     eax, eax
+        mov     ecx, SERIAL_PORTS_MAX
+        mov     edi, serial_ports
+        repne scasd
+        jnz     .err
+        ; store pointer to the port descriptor
+        sub     edi, 4
+        mov     eax, [port]
+        mov     [edi], eax
+        ; num of port
+        DEBUGF  1, "K : Added serial port 0x%x\n", edi, [port]
+        xor     eax, eax
+        ret
+
+.err:
+        xor     eax, eax
+        inc     eax
         ret
 endp
 
-; __stdcall u32 SerialRemovePort(SERIAL_DEVICE * device);
+; __stdcall u32 SerialRemovePort(struct serial_port * port);
 proc serial_remove_port stdcall, device:dword
         ret
 endp

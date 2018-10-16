@@ -24,6 +24,15 @@ include '../struct.inc'
 include '../macros.inc'
 include '../peimport.inc'
 
+struct serial_port
+        status          dd ? ; port status bit field
+        pid             dd ? ; who currently accesseing to port
+ends
+
+struct port serial_port
+        io_addr         dd ? ; base address of io port
+ends
+
 proc START c, state:dword, cmdline:dword
         cmp     [state], 1
         jne     .exit
@@ -57,19 +66,56 @@ proc service_proc stdcall, ioctl:dword
         ret
 endp
 
-proc add_port uses ebx, io_addr:dword
-        DEBUGF  L_DBG, "K : Found serial port 0x%x\n", [io_addr]
-        xor     ebx, ebx
+; return not null, if success
+proc add_port uses ebx edi, io_addr:dword
+        DEBUGF  L_DBG, "Serial: found serial port 0x%x\n", [io_addr]
+        xor     ebx, ebx ; 0 = reserve
         mov     ecx, [io_addr]
         lea     edx, [ecx + 7]
-        push    ebp edi
+        push    ebp
         invoke  ReservePortArea
-        pop     edi ebp
+        pop     ebp
         test    eax, eax
         jz      @f
-        DEBUGF  L_ERR, "K : Failed to reserve port\n"
-        ret
+        DEBUGF  L_ERR, "Serial: failed to reserve ports\n"
+        jmp     .err
 @@:
+        invoke  KernelAlloc, sizeof.port
+        test    eax, eax
+        jz      .nomem
+        mov     edi, eax
+        push    edi
+        ; clear allocated memory
+        xor     eax, eax
+        mov     ecx, sizeof.port
+        cld
+        rep stosb
+        pop     edi
+        ; fill
+        mov     eax, [io_addr]
+        mov     [edi + port.io_addr], eax
+        ; add device
+        invoke  SerialAddPort, edi
+        test    eax, eax
+        jnz     .fail
+        mov     eax, edi
+        ret
+
+.fail:
+        DEBUGF  L_ERR, "Serial: add device failed with code=%d\n", eax
+        invoke  KernelFree, edi
+
+.nomem:
+        xor     ebx, ebx
+        inc     ebx ; 1 = release
+        mov     ecx, [io_addr]
+        lea     edx, [ecx + 7]
+        push    ebp
+        invoke  ReservePortArea
+        pop     ebp
+
+.err:
+        xor     eax, eax
         ret
 endp
 
@@ -136,7 +182,7 @@ detect:
         jz      @f
         stdcall add_port, 0x2E8
 @@:
-        DEBUGF  L_DBG, "K : Serial ports scan completed\n"
+        DEBUGF  L_DBG, "Serial: ports scan completed\n"
         ret
 
 
