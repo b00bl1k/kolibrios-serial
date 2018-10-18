@@ -23,15 +23,15 @@ include '../fdo.inc'
 include '../struct.inc'
 include '../macros.inc'
 include '../peimport.inc'
-
-struct serial_port
-        status          dd ? ; port status bit field
-        pid             dd ? ; who currently accesseing to port
-ends
+include '../../kernel/trunk/serial-common.inc'
 
 struct port serial_port
         io_addr         dd ? ; base address of io port
 ends
+
+drv_funcs:
+        dd drv_startup
+        dd drv_shutdown
 
 proc START c, state:dword, cmdline:dword
         cmp     [state], 1
@@ -92,6 +92,8 @@ proc add_port uses ebx edi, io_addr:dword
         rep stosb
         pop     edi
         ; fill
+        mov     eax, drv_funcs
+        mov     [edi + port.funcs], eax
         mov     eax, [io_addr]
         mov     [edi + port.io_addr], eax
         ; add device
@@ -185,6 +187,15 @@ detect:
         DEBUGF  L_DBG, "Serial: ports scan completed\n"
         ret
 
+proc drv_startup stdcall, desc:DWORD
+        DEBUGF  L_DBG, "Serial: open 0x%x\n", [desc]
+        ret
+endp
+
+proc drv_shutdown stdcall, desc:DWORD
+        DEBUGF  L_DBG, "Serial: close 0x%x\n", [desc]
+        ret
+endp
 
 version     dd  0x0000001
 drv_name    db 'SERIAL', 0

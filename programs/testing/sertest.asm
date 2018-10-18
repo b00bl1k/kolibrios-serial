@@ -10,16 +10,30 @@ dd MEM
 dd STACKTOP
 dd 0, 0
 
-
 __DEBUG__ equ 1
 __DEBUG_LEVEL__ equ 1
 
 BTN_OPEN_ID = 2
 BTN_CLOSE_ID = 3
+BTN_STATUS_ID = 4
 
 include '../macros.inc'
 include '../debug-fdo.inc'
 include '../KOSfuncs.inc'
+include '../struct.inc'
+
+struct serial_status
+        size            db ? ; sizeof this struct
+        baudrate        dd ? ; current baudrate
+        rx_wait         dw ? ; bytes count in rx fifo
+        tx_wait         dw ? ; bytes count in tx fifo
+        dtr             db ?
+        rts             db ?
+        cts             db ?
+        dcd             db ?
+        dsr             db ?
+        ri              db ?
+ends
 
 START:
         mcall   SF_STYLE_SETTINGS, SSF_GET_COLORS, sc, sizeof.system_colors
@@ -56,6 +70,8 @@ button:
         jz      .open
         cmp     ah, BTN_CLOSE_ID
         jz      .close
+        cmp     ah, BTN_STATUS_ID
+        jz      .status
         jmp     event_wait
 
 .open:
@@ -68,6 +84,15 @@ button:
         DEBUGF  1, "Serial close result: 0x%x\n", eax
         jmp     event_wait
 
+.status:
+        mov     eax, sizeof.serial_status
+        mov     [stat + serial_status.size], al
+        mcall   78, 0x0002, stat
+        DEBUGF  1, "Serial status result: 0x%x\n", eax
+        mov     eax, [stat + serial_status.baudrate]
+        DEBUGF  1, "Serial baudrate: %d\n", eax
+        jmp     event_wait
+
 .exit:
         mcall   SF_TERMINATE_PROCESS
 
@@ -75,7 +100,7 @@ draw_window:
         mcall   SF_REDRAW, SSF_BEGIN_DRAW
 
         mov     ebx, 100 * 65536 + 300
-        mov     ecx, 100 * 65536 + 120
+        mov     ecx, 100 * 65536 + 500
         mov     edx, 0x34ffffff
         mov     esi, 0x808899ff
         mov     edi, title
@@ -88,8 +113,14 @@ draw_window:
         mcall   SF_DEFINE_BUTTON
 
         mov     ebx, 5 * 65536 + 100
-        mov     ecx, 34 * 65536 + 25
+        mov     ecx, 35 * 65536 + 25
         mov     edx, BTN_CLOSE_ID
+        mov     esi, [sc.work_button]
+        mcall   SF_DEFINE_BUTTON
+
+        mov     ebx, 5 * 65536 + 100
+        mov     ecx, 65 * 65536 + 25
+        mov     edx, BTN_STATUS_ID
         mov     esi, [sc.work_button]
         mcall   SF_DEFINE_BUTTON
 
@@ -103,6 +134,11 @@ draw_window:
         mov     edx, btn_close_cap
         mcall   SF_DRAW_TEXT, (5 + (100 - 5 * 8) / 2) shl 16 + 40
 
+        mov     ecx, [sc.work_button_text]
+        or      ecx, 0x90000000
+        mov     edx, btn_status_cap
+        mcall   SF_DRAW_TEXT, (5 + (100 - 6 * 8) / 2) shl 16 + 70
+
         mcall   SF_REDRAW, SSF_END_DRAW
 
         ret
@@ -110,6 +146,7 @@ draw_window:
 title           db "Serial Test", 0
 btn_open_cap    db "Open", 0
 btn_close_cap   db "Close", 0
+btn_status_cap  db "Status", 0
 
 include_debug_strings
 
@@ -118,6 +155,7 @@ I_END:
 
 align 4
 sc system_colors
+stat serial_status
 
 rb 4096
 align 16

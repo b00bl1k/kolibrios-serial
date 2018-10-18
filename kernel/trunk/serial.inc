@@ -7,18 +7,7 @@
 
 SERIAL_PORTS_MAX = 64
 
-SERIAL_ERR_PORT_COUNT = 1 ; reached maximum ports number in system
-SERIAL_ERR_PORT_INVALID = 2
-SERIAL_ERR_PORT_BUSY = 3
-SERIAL_ERR_ACCESS = 4
-
-SERIAL_STATUS_IS_OPENED = 0
-
-struct serial_port
-        mtx             MUTEX
-        status          dd ? ; port status bit field, see SERIAL_STATUS_*
-        pid             dd ? ; id of process-owner
-ends
+include 'serial-common.inc'
 
 uglobal
 align 4
@@ -36,6 +25,7 @@ serial_drv_name     db 'SERIAL', 0
 serial_api:
         dd serial_open
         dd serial_close
+        dd serial_get_status
 serial_api_end:
 endg
 
@@ -96,7 +86,7 @@ proc serial_remove_port stdcall, device:dword
         ret
 endp
 
-; ?eck that the port is open and we own it
+; Check that the port is open and we own it
 ; in:
 ;   eax -> pointer to the port descriptor
 ; out:
@@ -175,6 +165,9 @@ serial_open:
         mov     ebx, [TASK_BASE]
         mov     ebx, [ebx + TASKDATA.pid]
         mov     [eax + serial_port.pid], ebx
+        ; tell driver about port open
+        mov     ebx, [eax + serial_port.funcs]
+        stdcall dword [ebx + serial_funcs.startup], eax
         xor     eax, eax
         ret
 
@@ -185,8 +178,31 @@ serial_close:
         mov     eax, SERIAL_ERR_ACCESS
         ret
 @@:
+        ; tell driver about port close
+        mov     ebx, [eax + serial_port.funcs]
+        push    eax
+        stdcall dword [ebx + serial_funcs.shutdown], eax
+        pop     eax
         ; reset flag
         btc     [eax + serial_port.status], SERIAL_STATUS_IS_OPENED
+        xor     eax, eax
+        ret
+
+align 4
+serial_get_status:
+        call    serial_check_access
+        jnc     @f
+        mov     eax, SERIAL_ERR_ACCESS
+        ret
+@@:
+        movzx   eax, byte [ecx + serial_status.size]
+        cmp     eax, sizeof.serial_status
+        jae     @f
+        mov     eax, -2 ; invalid size of structure
+        ret
+@@:
+        mov     eax, 115200
+        mov     [ecx + serial_status.baudrate], eax
         xor     eax, eax
         ret
 
