@@ -7,20 +7,32 @@
 
 SERIAL_PORTS_MAX = 64
 
+SERIAL_ERR_PORT_COUNT = 1 ; reached maximum ports number in system
+SERIAL_ERR_PORT_INVALID = 2
+SERIAL_ERR_PORT_BUSY = 3
+SERIAL_ERR_ACCESS = 4
+
+SERIAL_STATUS_IS_OPENED = 0
+
 struct serial_port
-        status          dd ? ; port status bit field
-        pid             dd ? ; who currently accesseing to port
+        mtx             MUTEX
+        status          dd ? ; port status bit field, see SERIAL_STATUS_*
+        pid             dd ? ; id of process-owner
 ends
 
 uglobal
 align 4
+; list of serial ports
 serial_ports        rd SERIAL_PORTS_MAX
+; lock for serial ports list
 serial_ports_mutex  MUTEX
 endg
 
 iglobal
 align 4
+; base filename of driver
 serial_drv_name     db 'SERIAL', 0
+; table for api
 serial_api:
         dd serial_open
         dd serial_close
@@ -42,7 +54,7 @@ serial_init:
 
 ; __stdcall u32 SerialAddPort(struct serial_port * port);
 ; return 0 if ok, otherwise err code
-proc serial_add_port stdcall, port:dword
+proc serial_add_port stdcall uses edi, port:dword
         ; get access to list
         mov     ecx, serial_ports_mutex
         call    mutex_lock
@@ -51,22 +63,31 @@ proc serial_add_port stdcall, port:dword
         mov     ecx, SERIAL_PORTS_MAX
         mov     edi, serial_ports
         repne scasd
-        jnz     .err
+        jz      .found_slot
+        ; save error code
+        mov     eax, SERIAL_ERR_PORT_COUNT
+        push    eax
+        jmp     .unlock
+
+.found_slot:
         ; store pointer to the port descriptor
         sub     edi, 4
         mov     eax, [port]
+        ; initialize fields of descriptor
+        lea     ecx, [eax + serial_port.mtx]
+        call    mutex_init
+        ; write to slot
         mov     [edi], eax
-        DEBUGF  1, "K : Added serial port 0x%x\n", edi, [port]
-        mov     ecx, serial_ports_mutex
-        call    mutex_unlock
+        DEBUGF  1, "K : Added serial port 0x%x\n", [port]
+        ; save result 0 - no error
         xor     eax, eax
-        ret
+        push    eax
 
-.err:
+.unlock:
         mov     ecx, serial_ports_mutex
         call    mutex_unlock
-        xor     eax, eax
-        inc     eax
+        ; restore error code
+        pop     eax
         ret
 endp
 
@@ -75,34 +96,98 @@ proc serial_remove_port stdcall, device:dword
         ret
 endp
 
+; ?eck that the port is open and we own it
+; in:
+;   eax -> pointer to the port descriptor
+; out:
+;   cf=1 if no access
+proc serial_check_access
+        bt      [eax + serial_port.status], SERIAL_STATUS_IS_OPENED
+        jnc     @f ; not opened
+        push    ebx
+        mov     ebx, [TASK_BASE]
+        mov     ebx, [ebx + TASKDATA.pid]
+        cmp     [eax + serial_port.pid], ebx
+        pop     ebx
+        stc
+        jz      @f ; we owner
+        clc
+@@:
+        cmc
+        ret
+endp
+
 align 4
 syscall_serial:
+        ; eax = function
+        ; bl = sub function
+        ; bh = port number
         ; check if sub function exists
         cmp     bl, (serial_api_end - serial_api) / 4
-        jae     .error
-        ; check if port number is valid
-        movzx   esi, bh
-        shl     esi, 2
-        mov     eax, [esi + serial_ports]
-        test    eax, eax
-        jz      .error
-        and     ebx, 0xff
-        call    dword [serial_api + ebx * 4]
-        jmp     .return
-.error:
+        jl      .func_is_ok
         or      eax, -1
+        jmp     .return
+
+.func_is_ok:
+        ; check if port number is valid
+        movzx   eax, bh
+        shl     eax, 2
+        mov     eax, [eax + serial_ports]
+        test    eax, eax
+        jnz     .port_is_ok
+        mov     eax, SERIAL_ERR_PORT_INVALID
+        jmp     .return
+
+.port_is_ok:
+        ; eax is pointer to serial_port descriptor
+        push    eax ecx edx
+        ; get access to the port
+        lea     ecx, [eax + serial_port.mtx]
+        call    mutex_lock
+        pop     edx ecx eax
+        ; call function by number
+        and     ebx, 0xff
+        push    eax
+        ; pass args by regs:
+        ;   eax -> pointer to port descriptor (struct serial_port)
+        ;   ecx, edx, esi, edi = args of int40h
+        call    dword [serial_api + ebx * 4]
+        pop     esi
+        ; release access
+        lea     ecx, [esi + serial_port.mtx]
+        push    eax
+        call    mutex_unlock
+        pop     eax
+
 .return:
         mov     dword [esp + 32], eax
         ret
 
 align 4
 serial_open:
-        or      eax, -1
+        ; check for busy
+        bts     [eax + serial_port.status], SERIAL_STATUS_IS_OPENED
+        jnc     .open
+        mov     eax, SERIAL_ERR_PORT_BUSY
+        ret
+.open:
+        ; save id of calling process
+        mov     ebx, [TASK_BASE]
+        mov     ebx, [ebx + TASKDATA.pid]
+        mov     [eax + serial_port.pid], ebx
+        xor     eax, eax
         ret
 
 align 4
 serial_close:
-        or      eax, -1
+        call    serial_check_access
+        jnc     @f
+        mov     eax, SERIAL_ERR_ACCESS
+        ret
+@@:
+        ; reset flag
+        btc     [eax + serial_port.status], SERIAL_STATUS_IS_OPENED
+        xor     eax, eax
         ret
 
 align 4

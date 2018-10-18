@@ -3,3 +3,5 @@ contrib/
 data/
 programs/
 skins/
+kernel/
+drivers/
