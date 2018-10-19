@@ -45,6 +45,16 @@ serial_init:
 ; __stdcall u32 SerialAddPort(struct serial_port * port);
 ; return 0 if ok, otherwise err code
 proc serial_add_port stdcall uses edi, port:dword
+        ; check descriptor
+        mov     edi, [port]
+        ; 1. sizeof funcs table
+        mov     ecx, [edi + serial_port.funcs]
+        mov     eax, [ecx + serial_funcs.size]
+        cmp     eax, sizeof.serial_funcs
+        jz      @f
+        mov     eax, SERIAL_DRV_ERR_PORT_DESC
+        ret
+@@:
         ; get access to list
         mov     ecx, serial_ports_mutex
         call    mutex_lock
@@ -55,7 +65,7 @@ proc serial_add_port stdcall uses edi, port:dword
         repne scasd
         jz      .found_slot
         ; save error code
-        mov     eax, SERIAL_ERR_PORT_COUNT
+        mov     eax, SERIAL_DRV_ERR_PORT_COUNT
         push    eax
         jmp     .unlock
 
@@ -125,7 +135,7 @@ syscall_serial:
         mov     eax, [eax + serial_ports]
         test    eax, eax
         jnz     .port_is_ok
-        mov     eax, SERIAL_ERR_PORT_INVALID
+        mov     eax, SERIAL_API_ERR_PORT_INVALID
         jmp     .return
 
 .port_is_ok:
@@ -158,7 +168,7 @@ serial_open:
         ; check for busy
         bts     [eax + serial_port.status], SERIAL_STATUS_IS_OPENED
         jnc     .open
-        mov     eax, SERIAL_ERR_PORT_BUSY
+        mov     eax, SERIAL_API_ERR_PORT_BUSY
         ret
 .open:
         ; save id of calling process
@@ -175,7 +185,7 @@ align 4
 serial_close:
         call    serial_check_access
         jnc     @f
-        mov     eax, SERIAL_ERR_ACCESS
+        mov     eax, SERIAL_API_ERR_ACCESS
         ret
 @@:
         ; tell driver about port close
@@ -192,7 +202,7 @@ align 4
 serial_get_status:
         call    serial_check_access
         jnc     @f
-        mov     eax, SERIAL_ERR_ACCESS
+        mov     eax, SERIAL_API_ERR_ACCESS
         ret
 @@:
         movzx   eax, byte [ecx + serial_status.size]

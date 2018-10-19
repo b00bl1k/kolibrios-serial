@@ -5,14 +5,16 @@
 ;;                                                              ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-SERIAL_ERR_PORT_COUNT = 1 ; reached maximum ports number in system
-SERIAL_ERR_PORT_INVALID = 2
-SERIAL_ERR_PORT_BUSY = 3
-SERIAL_ERR_ACCESS = 4
+SERIAL_DRV_ERR_PORT_COUNT = 1 ; reached maximum ports number in system
+SERIAL_DRV_ERR_PORT_DESC = 2 ; invalid port descriptor
+SERIAL_API_ERR_PORT_INVALID = 1
+SERIAL_API_ERR_PORT_BUSY = 2
+SERIAL_API_ERR_ACCESS = 3
 
 SERIAL_STATUS_IS_OPENED = 0
 
 struct serial_funcs
+        size            dd ?
         startup         dd ?
         shutdown        dd ?
 ends
