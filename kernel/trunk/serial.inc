@@ -26,6 +26,9 @@ serial_api:
         dd serial_open
         dd serial_close
         dd serial_get_status
+        dd serial_set_ev_mask
+        dd serial_get_ev_mask
+        dd serial_read
 serial_api_end:
 endg
 
@@ -175,6 +178,10 @@ serial_open:
         mov     ebx, [TASK_BASE]
         mov     ebx, [ebx + TASKDATA.pid]
         mov     [eax + serial_port.pid], ebx
+        ; reset fields
+        and     [eax + serial_port.ev_mask], 0
+        and     [eax + serial_port.rx_ridx], 0
+        and     [eax + serial_port.rx_widx], 0
         ; tell driver about port open
         mov     ebx, [eax + serial_port.funcs]
         stdcall dword [ebx + serial_funcs.startup], eax
@@ -194,7 +201,7 @@ serial_close:
         stdcall dword [ebx + serial_funcs.shutdown], eax
         pop     eax
         ; reset flag
-        btc     [eax + serial_port.status], SERIAL_STATUS_IS_OPENED
+        and     [eax + serial_port.status], not (1 shl SERIAL_STATUS_IS_OPENED)
         xor     eax, eax
         ret
 
@@ -205,37 +212,90 @@ serial_get_status:
         mov     eax, SERIAL_API_ERR_ACCESS
         ret
 @@:
-        movzx   eax, byte [ecx + serial_status.size]
-        cmp     eax, sizeof.serial_status
+        movzx   ebx, byte [edi + serial_status.size]
+        cmp     ebx, sizeof.serial_status
         jae     @f
         mov     eax, -2 ; invalid size of structure
         ret
 @@:
-        mov     eax, 115200
-        mov     [ecx + serial_status.baudrate], eax
+        mov     ebx, 115200
+        mov     [edi + serial_status.baudrate], ebx
+
+        xor     ebx, ebx
+        spin_lock_irqsave
+        mov     bl, [eax + serial_port.rx_ridx]
+        mov     bh, [eax + serial_port.rx_widx]
+        spin_unlock_irqrestore
+        sub     bh, bl
+        jnc     @f
+        add     bh, 0xff
+@@:
+        shr     ebx, 8
+        mov     [edi + serial_status.rx_count], bx
         xor     eax, eax
         ret
 
 align 4
-serial_tx_start:
+serial_set_ev_mask:
+        call    serial_check_access
+        jnc     @f
+        mov     eax, SERIAL_API_ERR_ACCESS
+        ret
+@@:
+        spin_lock_irqsave
+        mov     [eax + serial_port.ev_mask], ecx
+        spin_unlock_irqrestore
+        xor     eax, eax
         ret
 
 align 4
-serial_tx_stop:
+serial_get_ev_mask:
+        or      eax, -1
         ret
 
 align 4
-serial_rx_stop:
+serial_read:
+        call    serial_check_access
+        jnc     @f
+        mov     eax, SERIAL_API_ERR_ACCESS
+        ret
+@@:
+        xor     ebx, ebx
+        xor     edx, edx
+        spin_lock_irqsave
+        mov     dl, [eax + serial_port.rx_ridx]
+        mov     bl, [eax + serial_port.rx_widx]
+        spin_unlock_irqrestore
+        DEBUGF  1, "K : serial ridx=%d, widx=%d\n", dl, bl
+        sub     bl, dl
+        jnc     @f
+        add     bl, 0xff
+@@:
+        ; ecx = num of requested bytes
+        ; ebx = num of available bytes
+        cmp     ebx, ecx
+        jle     @f
+        mov     ebx, ecx
+@@:
+        xchg    ecx, ebx
+        test    ecx, ecx
+        jz      .fail
+        lea     esi, [eax + serial_port.rx_buf]
+        add     esi, edx
+        push    ecx
+.copy:
+        inc     dl
+        movsb
+        loop    .copy
+        spin_lock_irqsave
+        mov     [eax + serial_port.rx_ridx], dl
+        spin_unlock_irqrestore
+        pop     ecx
+        DEBUGF  1, "K : serial readed=%d\n", dl, bl
+        mov     dword [esp + 36], ecx
+        xor     eax, eax
         ret
 
-align 4
-serial_rx_start:
-        ret
-
-align 4
-serial_enum:
-        ret
-
-align 4
-serial_opts:
+.fail:
+        or      eax, -1
         ret

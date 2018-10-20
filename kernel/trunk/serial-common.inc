@@ -23,15 +23,19 @@ struct serial_port
         mtx             MUTEX
         status          dd ? ; port status bit field, see SERIAL_STATUS_*
         pid             dd ? ; id of process-owner
-        funcs           serial_funcs
-        userdata        dd ? ; user-argument for serial functions
+        funcs           dd ? ; pointer to struct serial_funcs
+        ev_mask         dd ? ; event mask for process
+        ; simple ring buffer
+        rx_ridx         db ?
+        rx_widx         db ?
+        rx_buf          rb 256
 ends
 
 struct serial_status
         size            db ? ; sizeof this struct
         baudrate        dd ? ; current baudrate
-        rx_wait         dw ? ; bytes count in rx fifo
-        tx_wait         dw ? ; bytes count in tx fifo
+        rx_count        dw ? ; bytes count in rx fifo
+        tx_count        dw ? ; bytes count in tx fifo
         dtr             db ?
         rts             db ?
         cts             db ?
