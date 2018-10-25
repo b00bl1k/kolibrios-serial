@@ -15,81 +15,74 @@ __DEBUG__ = 1
 __DEBUG_LEVEL__ = L_DBG
 API_VERSION = 1
 
-; Registers offset
-UART_REG_RBR_RO = 0x00 ; Receive Buffer Register
-UART_REG_THR_WO = 0x00 ; Transmitter Holding Register
-UART_REG_DL_LSB = 0x00 ; Divisor Latch (LSB)
-UART_REG_IER = 0x01 ; Interrupt Enable Register
-UART_REG_DL_MSB = 0x01 ; Divisor Latch (MSB)
-UART_REG_IIR_RO = 0x02 ; Interrupt Indentification Register
-UART_REG_FCR_WO = 0x02 ; FIFO Control Register
-UART_REG_LCR = 0x03 ; Line Control Register
-UART_REG_MCR = 0x04 ; Modem Control Register
-UART_REG_LSR = 0x05 ; Line Status Register
-UART_REG_MSR = 0x06 ; Modem Status Register
-UART_REG_SCR = 0x07 ; Scratch Register
+THR_REG = 0 ; transtitter/reciever 3f8
+IER_REG = 1 ; interrupt enable 3f9
+IIR_REG = 2 ; interrupt info 3fa
+FCR_REG = 2 ; FIFO control 3fb
+LCR_REG = 3 ; line control 3fc
+MCR_REG = 4 ; modem control 3fd
+LSR_REG = 5 ; line status 3fe
+MSR_REG = 6 ; modem status 3ff
+SCR_REG = 7 ; scratch
 
-UART_FLAG_IER_DR = 0x00 ; Data Ready Interrupt
-UART_FLAG_IER_THRE = 0x01 ; THR Empty Interrupt
-UART_FLAG_IER_LS = 0x02 ; Line Status Interrupt
-UART_FLAG_IER_DSS = 0x03 ; Delta Status Signals Interrupt
+DLL_REG = THR_REG ; divisor latch (LSB)
+DLM_REG = IER_REG ; divisor latch (MSB)
 
-UART_FLAG_IIR_NO_INT = 0x00
-UART_FLAG_IIR_IID0 = 0x01
-UART_FLAG_IIR_IID1 = 0x02
-UART_FLAG_IIR_IID2 = 0x03
-UART_FLAG_IIR_IID_MASK = 0x0E
+LCR_5BIT   = 0x00
+LCR_6BIT   = 0x01
+LCR_7BIT   = 0x02
+LCR_8BIT   = 0x03
+LCR_STOP_1 = 0x00
+LCR_STOP_2 = 0x04
+LCR_PARITY = 0x08
+LCR_EVEN   = 0x10
+LCR_STICK  = 0x20
+LCR_BREAK  = 0x40
+LCR_DLAB   = 0x80
 
-UART_FLAG_FCR_EN = 0x00 ; FIFO enable
-UART_FLAG_FCR_CLR_RX = 0x01 ; Clear recevier FIFO
-UART_FLAG_FCR_CLR_TX = 0x02 ; Clear transmitter FIFO
-UART_FLAG_FCR_DMA = 0x03 ; DMA mode
-UART_FLAG_FCR_TRIG_LVL0 = 0x04 ; Trigger level of the DR-interrupt
-UART_FLAG_FCR_TRIG_LVL1 = 0x05
+LSR_DR   = 0x01 ; data ready
+LSR_OE   = 0x02 ; overrun error
+LSR_PE   = 0x04 ; parity error
+LSR_FE   = 0x08 ; framing error
+LSR_BI   = 0x10 ; break interrupt
+LSR_THRE = 0x20 ; transmitter holding empty
+LSR_TEMT = 0x40 ; transmitter empty
+LSR_FER  = 0x80 ; FIFO error
 
-UART_FLAG_LCR_WL0 = 0x00 ; Word length
-UART_FLAG_LCR_WL1 = 0x01
-UART_FLAG_LCR_SB = 0x02 ; Stop bits
-UART_FLAG_LCR_PE = 0x03 ; Parity enable
-UART_FLAG_LCR_ES = 0x04 ; Even Parity select
-UART_FLAG_LCR_SP = 0x05 ; Stick Parity select
-UART_FLAG_LCR_SBR = 0x06
-UART_FLAG_LCR_DLAB = 0x07
+FCR_EFIFO   = 0x01 ; enable FIFO
+FCR_CRB     = 0x02 ; clear reciever FIFO
+FCR_CXMIT   = 0x04 ; clear transmitter FIFO
+FCR_RDY     = 0x08 ; set RXRDY and TXRDY pins
+FCR_FIFO_1  = 0x00 ; 1  byte trigger
+FCR_FIFO_4  = 0x40 ; 4  bytes trigger
+FCR_FIFO_8  = 0x80 ; 8  bytes trigger
+FCR_FIFO_14 = 0xC0 ; 14 bytes trigger
 
-UART_FLAG_MCR_DTR = 0x00
-UART_FLAG_MCR_RTS = 0x01
-UART_FLAG_MCR_OUT1 = 0x02
-UART_FLAG_MCR_OUT2 = 0x03
-UART_FLAG_MCR_LOOP = 0x04
+IIR_INTR  = 0x01 ; 1= no interrupts
+IIR_IID   = 0x0E ; interrupt source mask
 
-UART_FLAG_LSR_RBF = 0x00 ; Receiver Buffer Full
-UART_FLAG_LSR_OE = 0x01 ; Overrun Error
-UART_FLAG_LSR_PE = 0x02 ; Parity error
-UART_FLAG_LSR_FE = 0x03 ; Framing Error
-UART_FLAG_LSR_BREAK = 0x04 ; Broken line detected
-UART_FLAG_LSR_THRE = 0x05 ; Transmitter Holding Register Empty
-UART_FLAG_LSR_TEMT = 0x06 ; Transmitter Empty
-UART_FLAG_LSR_FIFO_ERR = 0x07 ; At least one error is pending in the RX FIFO chain
+IER_RDAI  = 0x01 ; reciever data interrupt
+IER_THRI  = 0x02 ; transmitter empty interrupt
+IER_LSI   = 0x04 ; line status interrupt
+IER_MSI   = 0x08 ; modem status interrupt
 
-UART_FLAG_MSR_DCTS = 0x00
-UART_FLAG_MSR_DDSR = 0x01
-UART_FLAG_MSR_TERI = 0x02
-UART_FLAG_MSR_DDCD = 0x03
-UART_FLAG_MSR_CTS = 0x04
-UART_FLAG_MSR_DSR = 0x05
-UART_FLAG_MSR_RI = 0x06
-UART_FLAG_MSR_DCD = 0x07
+MCR_DTR   = 0x01 ; 0-> DTR=1, 1-> DTR=0
+MCR_RTS   = 0x02 ; 0-> RTS=1, 1-> RTS=0
+MCR_OUT1  = 0x04 ; 0-> OUT1=1, 1-> OUT1=0
+MCR_OUT2  = 0x08 ; 0-> OUT2=1, 1-> OUT2=0;  enable intr
+MCR_LOOP  = 0x10 ; lopback mode
 
-UART_TEST_SIGNALS = (1 shl UART_FLAG_MCR_DTR) + \
-                    (1 shl UART_FLAG_MCR_RTS) + \
-                    (1 shl UART_FLAG_MCR_OUT1) + \
-                    (1 shl UART_FLAG_MCR_OUT2) + \
-                    (1 shl UART_FLAG_MCR_LOOP)
+MSR_DCTS  = 0x01 ; delta clear to send
+MSR_DDSR  = 0x02 ; delta data set redy
+MSR_TERI  = 0x04 ; trailinh edge of ring
+MSR_DDCD  = 0x08 ; delta carrier detect
+MSR_CTS   = 0x10
+MSR_DSR   = 0x20
+MSR_RI    = 0x40
+MSR_DCD   = 0x80
 
-UART_CHECK_MASK = (1 shl UART_FLAG_MSR_CTS) + \
-                  (1 shl UART_FLAG_MSR_DSR) + \
-                  (1 shl UART_FLAG_MSR_RI) + \
-                  (1 shl UART_FLAG_MSR_DCD)
+MCR_TEST_MASK = MCR_DTR or MCR_RTS or MCR_OUT1 or MCR_OUT2 or MCR_LOOP
+MSR_CHECK_MASK = MSR_CTS or MSR_DSR or MSR_RI or MSR_DCD
 
 section '.flat' readable writable executable
 
@@ -125,13 +118,30 @@ macro wr_reg reg
         pop     edx
 }
 
+; dx = port
+; ax = divisor value
+proc uart_set_baud
+        push    eax
+        rd_reg  LCR_REG
+        or      al, LCR_DLAB
+        wr_reg  LCR_REG
+        pop     eax
+        wr_reg  DLL_REG
+        shr     ax, 8
+        wr_reg  DLM_REG
+        rd_reg  LCR_REG
+        and     al, 0x7f
+        wr_reg  LCR_REG
+        ret
+endp
+
 proc START c, state:dword, cmdline:dword
         cmp     [state], 1
         je      @f
         xor     eax, eax
         ret
 
-@@:
+  @@:
         stdcall add_port, 0x3f8, 4
         stdcall add_port, 0x2f8, 3
         stdcall add_port, 0x3e8, 4
@@ -147,17 +157,17 @@ proc service_proc stdcall, ioctl:dword
         jz      .getversion
         jmp     .err
 
-.getversion:
+  .getversion:
         cmp     [edi + IOCTL.out_size], 4
         jb      .err
         mov     edi, [edi + IOCTL.output]
         mov     dword [edi], API_VERSION
 
-.ok:
+  .ok:
         xor     eax, eax
         ret
 
-.err:
+  .err:
         or      eax, -1
         ret
 endp
@@ -171,44 +181,47 @@ proc add_port stdcall uses ebx edi, io_addr:dword, irqn:dword
         pop     ebp
         test    eax, eax
         jz      @f
+
         DEBUGF  L_ERR, "Serial: failed to reserve ports\n"
         jmp     .err
-@@:
+
+  @@:
         mov     edx, [io_addr]
 
         ; enable loopback
-        mov     al, (1 shl UART_FLAG_MCR_LOOP)
-        wr_reg  UART_REG_MCR
+        mov     al, MCR_LOOP
+        wr_reg  MCR_REG
 
         ; read status
-        rd_reg  UART_REG_MSR
-        and     al, UART_CHECK_MASK
+        rd_reg  MSR_REG
+        and     al, MSR_CHECK_MASK
         test    al, al
         jnz     .free_port
 
         ; set test signals
-        mov     al, UART_TEST_SIGNALS
-        wr_reg  UART_REG_MCR
+        mov     al, MCR_TEST_MASK
+        wr_reg  MCR_REG
 
         ; check signals
-        rd_reg  UART_REG_MSR
-        and     al, UART_CHECK_MASK
-        cmp     al, UART_CHECK_MASK
+        rd_reg  MSR_REG
+        and     al, MSR_CHECK_MASK
+        cmp     al, MSR_CHECK_MASK
         jnz     .free_port
 
         DEBUGF  L_DBG, "Serial: found serial port 0x%x\n", [io_addr]
 
         ; initialize port
-        xor     eax, eax
-        wr_reg  UART_REG_MCR
-        wr_reg  UART_REG_IER
-        wr_reg  UART_REG_LCR
-        wr_reg  UART_REG_FCR_WO
+        xor     ax, ax
+        wr_reg  MCR_REG
+        wr_reg  IER_REG
+        wr_reg  LCR_REG
+        wr_reg  FCR_REG
 
         ; create descriptor
         invoke  KernelAlloc, sizeof.port
         test    eax, eax
         jz      .free_port
+
         mov     edi, eax
         push    edi
 
@@ -225,7 +238,7 @@ proc add_port stdcall uses ebx edi, io_addr:dword, irqn:dword
         mov     eax, [io_addr]
         mov     [edi + port.io_addr], eax
 
-        invoke  AttachIntHandler, [irqn], irq_handler, edi
+        invoke  AttachIntHandler, [irqn], int_handler, edi
         test    eax, eax
         jz      .free_mem
 
@@ -233,14 +246,15 @@ proc add_port stdcall uses ebx edi, io_addr:dword, irqn:dword
         invoke  SerialAddPort, edi
         test    eax, eax
         jnz     .free_mem
+
         mov     eax, edi
         ret
 
-.free_mem:
+  .free_mem:
         DEBUGF  L_DBG, "Serial: add port 0x%x failed\n", [io_addr]
         invoke  KernelFree, edi
 
-.free_port:
+  .free_port:
         xor     ebx, ebx
         inc     ebx ; 1 = release
         mov     ecx, [io_addr]
@@ -249,26 +263,27 @@ proc add_port stdcall uses ebx edi, io_addr:dword, irqn:dword
         invoke  ReservePortArea
         pop     ebp
 
-.err:
+  .err:
         xor     eax, eax
         ret
 endp
 
-proc irq_handler c uses ebx edi, desc:dword
-locals
-        res     dd ? ; return 0 if no uart int pending
-endl
-        and     [res], 0
-        mov     ecx, [desc]
-        mov     edx, [ecx + port.io_addr]
-.read_iir:
-        rd_reg  UART_REG_IIR_RO
+proc int_handler c uses ebx esi edi, desc:dword
+        mov     esi, [desc]
+        mov     edx, [esi + port.io_addr]
+        xor     ebx, ebx
+        ; invoke  SerialWakeUp, [desc]
+
+  .read_iir:
+        rd_reg  IIR_REG
         DEBUGF  L_DBG, "SER INT 0x%x\n", al
-        test    al, (1 shl UART_FLAG_IIR_NO_INT)
+        test    al, IIR_INTR
         jnz     .exit
-        inc     [res]
-        and     ax, UART_FLAG_IIR_IID_MASK
+
+        inc     ebx
+        and     ax, IIR_IID
         shr     ax, 1
+
         ; check source
         test    ax, ax
         jz      .modem
@@ -278,87 +293,115 @@ endl
         jz      .recv
         cmp     ax, 3
         jz      .status
-        jmp     .read_iir
+        jmp     .exit
 
-.modem:
+  .modem:
         ; read MSR for clear interrupt
-        rd_reg  UART_REG_MSR
+        rd_reg  MSR_REG
         jmp     .read_iir
 
-.xmit:
+  .xmit:
         ; write byte or disable THRE int
         jmp     .read_iir
 
-.recv:
+  .recv:
         ; read byte
-        rd_reg  UART_REG_RBR_RO
-        mov     bl, [ecx + serial_port.rx_widx]
-        inc     bl
-        ; check free space
-        cmp     bl, [ecx + serial_port.rx_ridx]
-        je      .rx_overflow
-        ; put byte into rx buffer
-        dec     bl
-        lea     edi, [ecx + serial_port.rx_buf]
-        and     ebx, 0xff
-        add     edi, ebx
-        mov     [edi], al
-        inc     bl
-        mov     [ecx + serial_port.rx_widx], bl
-        rd_reg  UART_REG_LSR
-        test    al, 1 shl UART_FLAG_LSR_RBF
+        rd_reg  THR_REG
+
+        mov     edi, [esi + port.rx_buf + ring_buf.write_ptr]
+        sub     edi, [esi + port.rx_buf + ring_buf.start_ptr]
+        inc     edi
+        and     edi, SERIAL_RING_BUF_SIZE - 1
+        add     edi, [esi + port.rx_buf + ring_buf.start_ptr]
+        cmp     edi, [esi + port.rx_buf + ring_buf.read_ptr]
+        jnz     .put_byte
+
+        ; TODO: Overflow. Read all bytes from uart and exit
+        DEBUGF  L_DBG, "OVF\n"
+        jmp     .skip
+
+  .put_byte:
+        push    edi
+        mov     edi, [esi + port.rx_buf + ring_buf.write_ptr]
+        mov     byte [edi], al
+        pop     edi
+        inc     [esi + port.rx_buf + ring_buf.size]
+        mov     [esi + port.rx_buf + ring_buf.write_ptr], edi
+
+  .skip:
+        ; check for more recevied bytes
+        rd_reg  LSR_REG
+        test    al, LSR_DR
         jnz     .recv
-
-.rx_overflow:
         jmp     .read_iir
 
-.status:
-        rd_reg  UART_REG_LSR
-        DEBUGF  L_DBG, "LSR 0x%x\n", al
+  .status:
+        rd_reg  LSR_REG
         jmp     .read_iir
 
-.fifo:
+  .fifo:
         jmp     .read_iir
 
-.exit:
-        mov     eax, [res]
+  .exit:
+        xchg    eax, ebx
         ret
 endp
 
-proc drv_startup stdcall, desc:DWORD
+proc drv_startup stdcall, desc:dword
         DEBUGF  L_DBG, "Serial: open 0x%x\n", [desc]
         mov     ecx, [desc]
         mov     edx, [ecx + port.io_addr]
-        ; 115200
-        mov     al, 1 shl UART_FLAG_LCR_DLAB
-        wr_reg  UART_REG_LCR
-        mov     al, 1
-        wr_reg  UART_REG_DL_LSB
-        mov     al, 0
-        wr_reg  UART_REG_DL_MSB
-        ; 8n1
-        mov     al, (1 shl UART_FLAG_LCR_WL0) or \
-                    (1 shl UART_FLAG_LCR_WL1)
-        wr_reg  UART_REG_LCR
-        ; dtr, out1, out2
-        mov     al, (1 shl UART_FLAG_MCR_DTR) or \
-                    (1 shl UART_FLAG_MCR_OUT1) or \
-                    (1 shl UART_FLAG_MCR_OUT2)
-        wr_reg  UART_REG_MCR
+
+        mov     ax, 12 ; 9600
+        call    uart_set_baud
+
+        mov     al, LCR_8BIT
+        wr_reg  LCR_REG
+
+        mov     al, MCR_DTR or MCR_OUT1 or MCR_OUT2
+        wr_reg  MCR_REG
+
         ; enable rx interrupt
-        mov     al, (1 shl UART_FLAG_IER_DR) or (1 shl UART_FLAG_IER_LS)
-        wr_reg  UART_REG_IER
+        mov     al, IER_RDAI or IER_LSI
+        wr_reg  IER_REG
+
         ret
 endp
 
-proc drv_shutdown stdcall, desc:DWORD
+proc drv_shutdown stdcall, desc:dword
         DEBUGF  L_DBG, "Serial: close 0x%x\n", [desc]
         ; disable interrupts
         mov     ecx, [desc]
         mov     edx, [ecx + port.io_addr]
         xor     ax, ax
-        wr_reg  UART_REG_IER
-        wr_reg  UART_REG_MCR
+        wr_reg  IER_REG
+        ret
+endp
+
+proc drv_read_sr stdcall, desc:dword
+        mov     ecx, [desc]
+        mov     edx, [ecx + port.io_addr]
+        rd_reg  LSR_REG
+        shl     ax, 8
+        rd_reg  MSR_REG
+        mov     dx, ax
+        xor     eax, eax
+        test    dh, LSR_DR shl 8
+        jz      @f
+        or      eax, SERIAL_SR_RXNE
+  @@:
+        test    dh, LSR_THRE
+        jz      @f
+        or      eax, SERIAL_SR_TXE
+  @@:
+        ret
+endp
+
+proc drv_read_dr stdcall, desc:dword
+        mov     ecx, [desc]
+        mov     edx, [ecx + port.io_addr]
+        xor     eax, eax
+        rd_reg  THR_REG
         ret
 endp
 

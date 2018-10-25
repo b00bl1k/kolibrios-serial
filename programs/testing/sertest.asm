@@ -102,8 +102,11 @@ button:
 
         mov     edi, test_buf
         mcall   78, 0x0005, 10
+        lea     edi, [ecx + test_buf]
+        mov     byte [edi], 0
         DEBUGF  1, "Serial read result: eax=0x%x ecx=0x%x\n", eax, ecx
 
+        call    draw_window
         jmp     event_wait
 
 .exit:
@@ -151,6 +154,11 @@ draw_window:
         or      ecx, 0x90000000
         mov     edx, btn_status_cap
         mcall   SF_DRAW_TEXT, (5 + (100 - 6 * 8) / 2) shl 16 + 70
+
+        mov     ecx, [sc.work_text]
+        or      ecx, 0x90000000
+        mov     edx, test_buf
+        mcall   SF_DRAW_TEXT, 5 shl 16 + 110
 
         mcall   SF_REDRAW, SSF_END_DRAW
 

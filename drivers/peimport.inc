@@ -164,6 +164,7 @@ import core,\
               AcpiGetRootPtr,\
 \
               SerialAddPort,\
-              SerialRemovePort
+              SerialRemovePort,\
+              SerialWakeUp
 \
 end data

@@ -15,6 +15,8 @@ align 4
 serial_ports        rd SERIAL_PORTS_MAX
 ; lock for serial ports list
 serial_ports_mutex  MUTEX
+; event for serial
+serial_event        dd ?
 endg
 
 iglobal
@@ -37,13 +39,60 @@ serial_init:
         ; initialize lock for serial ports list
         mov     ecx, serial_ports_mutex
         call    mutex_init
+
+;         ; create serial thread
+;         movi    ebx, 1 ; kernel thread
+;         mov     ecx, serial_thread_proc
+;         xor     edx, edx
+;         call    new_sys_threads
+;         test    eax, eax
+;         jns     @f
+;         DEBUGF  1, "K : Cannot create kernel thread for serial, error %d\n", eax
+;         jmp     .exit
+; @@:
+
+;         ; wait while the serial thread initializes itself
+;         call    change_task
+;         cmp     [serial_event], 0
+;         jz      @b
+;         cmp     [serial_event], -1
+;         jz      .exit
+
         ; try to load std serial port driver
         stdcall get_service, serial_drv_name
         test    eax, eax
-        jnz     .fail
-        DEBUGF  1, "K : Serial driver is not loaded\n"
-.fail:
+        jnz     .exit
+        DEBUGF  1, "K : Standard serial driver is not loaded\n"
+
+.exit:
         ret
+
+proc serial_thread_proc
+        ; create event
+        xor     esi, esi
+        mov     ecx, MANUAL_DESTROY
+        call    create_event
+        test    eax, eax
+        jnz     @f
+        DEBUGF  1, "Cannot create event for serial thread\n"
+        or      [serial_event], -1
+        jmp     sys_end
+  @@:
+        ; save event handle
+        mov     [serial_event], eax
+  .wait_ev:
+        ; main loop of thread
+        mov     eax, [serial_event]
+        mov     ebx, [eax + EVENT.id]
+        or      ecx, -1
+        call    wait_event_timeout
+
+        mov     eax, [serial_event]
+        mov     ebx, [eax + EVENT.code + serial_evdata.port]
+        call    serial_check_port
+
+        jmp     .wait_ev
+endp
 
 ; __stdcall u32 SerialAddPort(struct serial_port * port);
 ; return 0 if ok, otherwise err code
@@ -57,7 +106,27 @@ proc serial_add_port stdcall uses edi, port:dword
         jz      @f
         mov     eax, SERIAL_DRV_ERR_PORT_DESC
         ret
-@@:
+
+  @@:
+        ; create rx and tx ring buffers
+        lea     eax, [edi + serial_port.rx_buf]
+        stdcall serial_create_ring_buf, eax
+        test    eax, eax
+        jnz     @f
+        mov     eax, SERIAL_DRV_ERR_NO_MEM
+        ret
+
+  @@:
+        lea     eax, [edi + serial_port.tx_buf]
+        stdcall serial_create_ring_buf, eax
+        test    eax, eax
+        jnz     @f
+        mov     eax, [edi + serial_port.rx_buf + ring_buf.start_ptr]
+        call    free
+        mov     eax, SERIAL_DRV_ERR_NO_MEM
+        ret
+
+  @@:
         ; get access to list
         mov     ecx, serial_ports_mutex
         call    mutex_lock
@@ -72,7 +141,7 @@ proc serial_add_port stdcall uses edi, port:dword
         push    eax
         jmp     .unlock
 
-.found_slot:
+  .found_slot:
         ; store pointer to the port descriptor
         sub     edi, 4
         mov     eax, [port]
@@ -86,7 +155,7 @@ proc serial_add_port stdcall uses edi, port:dword
         xor     eax, eax
         push    eax
 
-.unlock:
+  .unlock:
         mov     ecx, serial_ports_mutex
         call    mutex_unlock
         ; restore error code
@@ -95,7 +164,98 @@ proc serial_add_port stdcall uses edi, port:dword
 endp
 
 ; __stdcall u32 SerialRemovePort(struct serial_port * port);
-proc serial_remove_port stdcall, device:dword
+proc serial_remove_port stdcall, port:dword
+        ret
+endp
+
+; __stdcall u32 SerialWakeUp(struct serial_port * port);
+proc serial_wake_up stdcall uses ebx esi edi, port:dword
+locals
+evdata serial_evdata
+endl
+        ; store pointer to serial_port
+        lea     esi, [evdata]
+        mov     eax, [port]
+        mov     [esi + serial_evdata.port], eax
+
+        mov     eax, [serial_event]
+        mov     ebx, [eax + EVENT.id]
+        xor     edx, edx
+        call    raise_event
+        ret
+endp
+
+proc serial_create_ring_buf stdcall uses esi, rb_ptr
+        mov     esi, [rb_ptr]
+        movi    eax, SERIAL_RING_BUF_SIZE
+        call    malloc
+        test    eax, eax
+        jz      .exit
+
+        lea     ecx, [esi + ring_buf.mutex]
+        call    mutex_init
+
+        mov     [esi + ring_buf.start_ptr], eax
+        mov     [esi + ring_buf.write_ptr], eax
+        mov     [esi + ring_buf.read_ptr], eax
+        mov     [esi + ring_buf.size], 0
+        add     eax, SERIAL_RING_BUF_SIZE
+        mov     [esi + ring_buf.end_ptr], eax
+        mov     eax, esi
+
+  .exit:
+        ret
+endp
+
+;-----------------------------------------------------------------;
+;                                                                 ;
+; serial_ring_buf_read: Read from ring buffer                     ;
+;                                                                 ;
+;   IN: eax = ring struct ptr                                     ;
+;       ecx = bytes to read                                       ;
+;       edi = ptr to buffer start                                 ;
+;                                                                 ;
+;  OUT: eax = unchanged                                           ;
+;       ecx = number of bytes read (0 on error)                   ;
+;       edx = destroyed                                           ;
+;       esi = destroyed                                           ;
+;       edi = ptr to buffer end                                   ;
+;                                                                 ;
+;-----------------------------------------------------------------;
+proc serial_ring_buf_read
+        DEBUGF  1, "serial_ring_buf_read: ringbuff=%x ptr=%x size=%u\n", eax, edi, ecx
+
+        mov     esi, [eax + ring_buf.read_ptr]
+        mov     edx, [eax + ring_buf.size]
+
+        cmp     ecx, edx
+        jle     @f
+        ; less than request
+        mov     ecx, edx
+  @@:
+        DEBUGF  1, "serial_ring_buf_read: %u bytes from %x to %x\n", ecx, esi, edi
+        push    ecx
+        shr     ecx, 1
+        jnc     .nb
+        movsb
+  .nb:
+        shr     ecx, 1
+        jnc     .nw
+        movsw
+  .nw:
+        test    ecx, ecx
+        jz      .nd
+        rep movsd
+  .nd:
+        pop     ecx
+
+        sub     [eax + ring_buf.size], ecx
+        add     [eax + ring_buf.read_ptr], ecx
+        mov     edx, [eax + ring_buf.end_ptr]
+        cmp     [eax + ring_buf.read_ptr], edx
+        jb      @f
+        sub     [eax + ring_buf.read_ptr], SERIAL_RING_BUF_SIZE
+  @@:
         ret
 endp
 
@@ -115,7 +275,7 @@ proc serial_check_access
         stc
         jz      @f ; we owner
         clc
-@@:
+  @@:
         cmc
         ret
 endp
@@ -131,7 +291,7 @@ syscall_serial:
         or      eax, -1
         jmp     .return
 
-.func_is_ok:
+  .func_is_ok:
         ; check if port number is valid
         movzx   eax, bh
         shl     eax, 2
@@ -141,7 +301,7 @@ syscall_serial:
         mov     eax, SERIAL_API_ERR_PORT_INVALID
         jmp     .return
 
-.port_is_ok:
+  .port_is_ok:
         ; eax is pointer to serial_port descriptor
         push    eax ecx edx
         ; get access to the port
@@ -162,7 +322,7 @@ syscall_serial:
         call    mutex_unlock
         pop     eax
 
-.return:
+  .return:
         mov     dword [esp + 32], eax
         ret
 
@@ -173,15 +333,13 @@ serial_open:
         jnc     .open
         mov     eax, SERIAL_API_ERR_PORT_BUSY
         ret
-.open:
+  .open:
         ; save id of calling process
         mov     ebx, [TASK_BASE]
         mov     ebx, [ebx + TASKDATA.pid]
         mov     [eax + serial_port.pid], ebx
         ; reset fields
         and     [eax + serial_port.ev_mask], 0
-        and     [eax + serial_port.rx_ridx], 0
-        and     [eax + serial_port.rx_widx], 0
         ; tell driver about port open
         mov     ebx, [eax + serial_port.funcs]
         stdcall dword [ebx + serial_funcs.startup], eax
@@ -194,7 +352,7 @@ serial_close:
         jnc     @f
         mov     eax, SERIAL_API_ERR_ACCESS
         ret
-@@:
+  @@:
         ; tell driver about port close
         mov     ebx, [eax + serial_port.funcs]
         push    eax
@@ -211,27 +369,18 @@ serial_get_status:
         jnc     @f
         mov     eax, SERIAL_API_ERR_ACCESS
         ret
-@@:
+  @@:
         movzx   ebx, byte [edi + serial_status.size]
         cmp     ebx, sizeof.serial_status
         jae     @f
         mov     eax, -2 ; invalid size of structure
         ret
-@@:
+  @@:
         mov     ebx, 115200
         mov     [edi + serial_status.baudrate], ebx
 
-        xor     ebx, ebx
-        spin_lock_irqsave
-        mov     bl, [eax + serial_port.rx_ridx]
-        mov     bh, [eax + serial_port.rx_widx]
-        spin_unlock_irqrestore
-        sub     bh, bl
-        jnc     @f
-        add     bh, 0xff
-@@:
-        shr     ebx, 8
-        mov     [edi + serial_status.rx_count], bx
+        mov     eax, [eax + serial_port.rx_buf + ring_buf.size]
+        mov     [edi + serial_status.rx_count], ax
         xor     eax, eax
         ret
 
@@ -241,11 +390,8 @@ serial_set_ev_mask:
         jnc     @f
         mov     eax, SERIAL_API_ERR_ACCESS
         ret
-@@:
-        spin_lock_irqsave
-        mov     [eax + serial_port.ev_mask], ecx
-        spin_unlock_irqrestore
-        xor     eax, eax
+  @@:
+        or      eax, -1
         ret
 
 align 4
@@ -259,43 +405,12 @@ serial_read:
         jnc     @f
         mov     eax, SERIAL_API_ERR_ACCESS
         ret
-@@:
-        xor     ebx, ebx
-        xor     edx, edx
-        spin_lock_irqsave
-        mov     dl, [eax + serial_port.rx_ridx]
-        mov     bl, [eax + serial_port.rx_widx]
-        spin_unlock_irqrestore
-        DEBUGF  1, "K : serial ridx=%d, widx=%d\n", dl, bl
-        sub     bl, dl
-        jnc     @f
-        add     bl, 0xff
-@@:
-        ; ecx = num of requested bytes
-        ; ebx = num of available bytes
-        cmp     ebx, ecx
-        jle     @f
-        mov     ebx, ecx
-@@:
-        xchg    ecx, ebx
-        test    ecx, ecx
-        jz      .fail
-        lea     esi, [eax + serial_port.rx_buf]
-        add     esi, edx
-        push    ecx
-.copy:
-        inc     dl
-        movsb
-        loop    .copy
-        spin_lock_irqsave
-        mov     [eax + serial_port.rx_ridx], dl
-        spin_unlock_irqrestore
-        pop     ecx
-        DEBUGF  1, "K : serial readed=%d\n", dl, bl
-        mov     dword [esp + 36], ecx
-        xor     eax, eax
-        ret
 
-.fail:
-        or      eax, -1
+  @@:
+        spin_lock_irqsave
+        lea     eax, [eax + serial_port.rx_buf]
+        call    serial_ring_buf_read
+        spin_unlock_irqrestore
+        mov     dword [esp + 36], ecx
+        and     eax, 0
         ret

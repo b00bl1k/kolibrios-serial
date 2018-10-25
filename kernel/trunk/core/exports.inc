@@ -137,6 +137,7 @@ __exports:
 \
           serial_add_port,       'SerialAddPort',      \
           serial_remove_port,    'SerialRemovePort',   \
+          serial_wake_up,        'SerialWakeUp',       \
 \
           0,                     'LFBAddress' ; must be the last one
 load kernel_exports_count dword from __exports + 24
