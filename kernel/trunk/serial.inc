@@ -259,116 +259,143 @@ proc serial_ring_buf_read
         ret
 endp
 
-; Check that the port is open and we own it
-; in:
-;   eax -> pointer to the port descriptor
-; out:
-;   cf=1 if no access
-proc serial_check_access
-        bt      [eax + serial_port.status], SERIAL_STATUS_IS_OPENED
-        jnc     @f ; not opened
-        push    ebx
-        mov     ebx, [TASK_BASE]
-        mov     ebx, [ebx + TASKDATA.pid]
-        cmp     [eax + serial_port.pid], ebx
-        pop     ebx
-        stc
-        jz      @f ; we owner
-        clc
-  @@:
-        cmc
-        ret
-endp
-
+; In:
+;   eax = function
+;   bl = sub function
+; Out:
+;   eax = 0 on success
 align 4
 syscall_serial:
-        ; eax = function
-        ; bl = sub function
-        ; bh = port number
         ; check if sub function exists
         cmp     bl, (serial_api_end - serial_api) / 4
-        jl      .func_is_ok
+        jl      @f
         or      eax, -1
-        jmp     .return
+        jmp     .exit
 
-  .func_is_ok:
-        ; check if port number is valid
-        movzx   eax, bh
-        shl     eax, 2
-        mov     eax, [eax + serial_ports]
-        test    eax, eax
-        jnz     .port_is_ok
-        mov     eax, SERIAL_API_ERR_PORT_INVALID
-        jmp     .return
+  @@:
+        movzx   eax, bl
+        call    dword [serial_api + eax * 4]
 
-  .port_is_ok:
-        ; eax is pointer to serial_port descriptor
-        push    eax ecx edx
-        ; get access to the port
-        lea     ecx, [eax + serial_port.mtx]
-        call    mutex_lock
-        pop     edx ecx eax
-        ; call function by number
-        and     ebx, 0xff
-        push    eax
-        ; pass args by regs:
-        ;   eax -> pointer to port descriptor (struct serial_port)
-        ;   ecx, edx, esi, edi = args of int40h
-        call    dword [serial_api + ebx * 4]
-        pop     esi
-        ; release access
-        lea     ecx, [esi + serial_port.mtx]
-        push    eax
-        call    mutex_unlock
-        pop     eax
-
-  .return:
+  .exit:
         mov     dword [esp + 32], eax
         ret
 
+; In:
+;   bh = port number
+; Out:
+;   ecx = port handle on success
 align 4
 serial_open:
-        ; check for busy
-        bts     [eax + serial_port.status], SERIAL_STATUS_IS_OPENED
-        jnc     .open
-        mov     eax, SERIAL_API_ERR_PORT_BUSY
-        ret
+        ; get access to the serial ports list
+        mov     ecx, serial_ports_mutex
+        call    mutex_lock
+
+        ; check for port is exists
+        movzx   eax, bh
+        shl     eax, 2
+        mov     esi, [eax + serial_ports]
+
+        test    esi, esi
+        jnz     .found
+
+        or      eax, -1
+        jmp     .unlock_list
+
+  .found:
+        ; get access to serial port
+        lea     ecx, [esi + serial_port.mtx]
+        call    mutex_lock
+
+        ; checks for busy. If port is opened this value will be nonzero.
+        cmp     [esi + serial_port.con], 0
+        jnz     .err
+
   .open:
-        ; save id of calling process
         mov     ebx, [TASK_BASE]
         mov     ebx, [ebx + TASKDATA.pid]
-        mov     [eax + serial_port.pid], ebx
-        ; reset fields
-        and     [eax + serial_port.ev_mask], 0
+        mov     eax, sizeof.serial_con
+        call    create_kernel_object
+        test    eax, eax
+        jz      .err
+
+        DEBUGF  1, "Serial: created object 0x%x\n", eax
+        mov     [eax + serial_con.magic], 'UART'
+        mov     [eax + serial_con.destroy], serial_close.destroy
+        mov     [eax + serial_con.hport], esi
+
+        ; fill fields
+        mov     [esi + serial_port.con], eax
+        and     [esi + serial_port.ev_mask], 0
+
         ; tell driver about port open
-        mov     ebx, [eax + serial_port.funcs]
-        stdcall dword [ebx + serial_funcs.startup], eax
+        DEBUGF  1, "K : drv open port\n"
+        mov     ebx, [esi + serial_port.funcs]
+        push    eax
+        stdcall dword [ebx + serial_funcs.startup], esi
+        pop     eax
+
+        ; return port handle in ecx
+        mov     dword [esp + 32], eax
         xor     eax, eax
+        jmp     .unlock_port
+
+  .err:
+        or      eax, -1
+
+  .unlock_port:
+        push    eax
+        lea     ecx, [esi + serial_port.mtx]
+        call    mutex_unlock
+        pop     eax
+
+  .unlock_list:
+        push    eax
+        mov     ecx, serial_ports_mutex
+        call    mutex_unlock
+        pop     eax
+
         ret
 
+; In:
+;   ecx = port handle
 align 4
 serial_close:
-        call    serial_check_access
-        jnc     @f
-        mov     eax, SERIAL_API_ERR_ACCESS
+        xchg    eax, ecx
+        cmp     [eax + serial_con.magic], 'UART'
+        je      .destroy
+        ; TODO: more checks?
+        or      eax, -1
         ret
-  @@:
+
+  .destroy:
+        ; also called on destroy app object
+        mov     esi, [eax + serial_con.hport]
+        push    eax
+        lea     ecx, [esi + serial_port.mtx]
+        call    mutex_lock
+        pop     eax
+        call    destroy_kernel_object
+
+        and     [esi + serial_port.con], 0
         ; tell driver about port close
-        mov     ebx, [eax + serial_port.funcs]
+        mov     ebx, [esi + serial_port.funcs]
         push    eax
         stdcall dword [ebx + serial_funcs.shutdown], eax
         pop     eax
-        ; reset flag
-        and     [eax + serial_port.status], not (1 shl SERIAL_STATUS_IS_OPENED)
+
+        lea     ecx, [esi + serial_port.mtx]
+        call    mutex_unlock
+
         xor     eax, eax
         ret
 
 align 4
 serial_get_status:
-        call    serial_check_access
-        jnc     @f
-        mov     eax, SERIAL_API_ERR_ACCESS
+        cmp     [ecx + serial_con.magic], 'UART'
+        je      @f
+        or      eax, -1
         ret
+
   @@:
         movzx   ebx, byte [edi + serial_status.size]
         cmp     ebx, sizeof.serial_status
@@ -376,21 +403,24 @@ serial_get_status:
         mov     eax, -2 ; invalid size of structure
         ret
   @@:
+        mov     esi, [ecx + serial_con.hport]
+        lea     ecx, [esi + serial_port.mtx]
+        call    mutex_lock
+
         mov     ebx, 115200
         mov     [edi + serial_status.baudrate], ebx
 
-        mov     eax, [eax + serial_port.rx_buf + ring_buf.size]
+        mov     eax, [esi + serial_port.rx_buf + ring_buf.size]
         mov     [edi + serial_status.rx_count], ax
+
+        lea     ecx, [esi + serial_port.mtx]
+        call    mutex_unlock
+
         xor     eax, eax
         ret
 
 align 4
 serial_set_ev_mask:
-        call    serial_check_access
-        jnc     @f
-        mov     eax, SERIAL_API_ERR_ACCESS
-        ret
-  @@:
         or      eax, -1
         ret
 
@@ -401,16 +431,28 @@ serial_get_ev_mask:
 
 align 4
 serial_read:
-        call    serial_check_access
-        jnc     @f
-        mov     eax, SERIAL_API_ERR_ACCESS
+        cmp     [ecx + serial_con.magic], 'UART'
+        je      @f
+        or      eax, -1
         ret
 
   @@:
+        mov     esi, [ecx + serial_con.hport]
+        lea     ecx, [esi + serial_port.mtx]
+        push    edx
+        call    mutex_lock
+        pop     ecx
         spin_lock_irqsave
-        lea     eax, [eax + serial_port.rx_buf]
+        lea     eax, [esi + serial_port.rx_buf]
+        push    esi
         call    serial_ring_buf_read
+        pop     esi
         spin_unlock_irqrestore
-        mov     dword [esp + 36], ecx
+
+        mov     dword [esp + 32], ecx
+
+        lea     ecx, [esi + serial_port.mtx]
+        call    mutex_unlock
+
         and     eax, 0
         ret

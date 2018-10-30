@@ -76,11 +76,12 @@ button:
 
 .open:
         mcall   78, 0x0000
-        DEBUGF  1, "Serial open result: 0x%x\n", eax
+        DEBUGF  1, "Serial open result: 0x%x 0x%x\n", eax, ecx
+        mov     [port], ecx
         jmp     event_wait
 
 .close:
-        mcall   78, 0x0001
+        mcall   78, 0x01, [port]
         DEBUGF  1, "Serial close result: 0x%x\n", eax
         jmp     event_wait
 
@@ -88,7 +89,7 @@ button:
         mov     eax, sizeof.serial_status
         mov     [stat + serial_status.size], al
         mov     edi, stat
-        mcall   78, 0x0002
+        mcall   78, 0x0002, [port]
         test    eax, eax
         jnz     event_wait
 
@@ -101,7 +102,7 @@ button:
         jz      event_wait
 
         mov     edi, test_buf
-        mcall   78, 0x0005, 10
+        mcall   78, 0x0005, [port], 10
         lea     edi, [ecx + test_buf]
         mov     byte [edi], 0
         DEBUGF  1, "Serial read result: eax=0x%x ecx=0x%x\n", eax, ecx
@@ -178,6 +179,7 @@ align 4
 sc system_colors
 stat serial_status
 test_buf rb 20
+port dd ?
 
 rb 4096
 align 16

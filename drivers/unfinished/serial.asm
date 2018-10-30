@@ -92,6 +92,15 @@ include '../fdo.inc'
 include '../struct.inc'
 include '../macros.inc'
 include '../peimport.inc'
+
+struct  APPOBJ                  ; common object header
+        magic           dd ?    ;
+        destroy         dd ?    ; internal destructor
+        fd              dd ?    ; next object in list
+        bk              dd ?    ; prev object in list
+        pid             dd ?    ; owner id
+ends
+
 include '../../kernel/trunk/serial-common.inc'
 
 struct port serial_port

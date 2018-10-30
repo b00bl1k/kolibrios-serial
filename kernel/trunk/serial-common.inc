@@ -13,8 +13,6 @@ SERIAL_API_ERR_PORT_INVALID = 1
 SERIAL_API_ERR_PORT_BUSY = 2
 SERIAL_API_ERR_ACCESS = 3
 
-SERIAL_STATUS_IS_OPENED = 0
-
 SERIAL_RING_BUF_SIZE = 16
 
 SERIAL_SR_RXNE = 0x01 ; RX buffer is not empty
@@ -35,10 +33,13 @@ struct ring_buf
         size                    dd ?    ; Number of bytes buffered
 ends
 
+struct serial_con APPOBJ
+        hport           dd ? ; pointer to serial_port
+ends
+
 struct serial_port
         mtx             MUTEX
-        status          dd ? ; port status bit field, see SERIAL_STATUS_*
-        pid             dd ? ; id of process-owner
+        con             dd ? ; pointer to serial_con, if port is opened, otherwise null
         funcs           dd ? ; pointer to struct serial_funcs
         ev_mask         dd ? ; event mask for process
         rx_buf          ring_buf
