@@ -191,7 +191,7 @@ proc add_port stdcall uses ebx edi, io_addr:dword, irqn:dword
         test    eax, eax
         jz      @f
 
-        DEBUGF  L_ERR, "Serial: failed to reserve ports\n"
+        DEBUGF  L_ERR, "serial.sys: failed to reserve ports\n"
         jmp     .err
 
   @@:
@@ -217,7 +217,7 @@ proc add_port stdcall uses ebx edi, io_addr:dword, irqn:dword
         cmp     al, MSR_CHECK_MASK
         jnz     .free_port
 
-        DEBUGF  L_DBG, "Serial: found serial port 0x%x\n", [io_addr]
+        DEBUGF  L_DBG, "serial.sys: found serial port 0x%x\n", [io_addr]
 
         ; initialize port
         xor     ax, ax
@@ -260,7 +260,7 @@ proc add_port stdcall uses ebx edi, io_addr:dword, irqn:dword
         ret
 
   .free_mem:
-        DEBUGF  L_DBG, "Serial: add port 0x%x failed\n", [io_addr]
+        DEBUGF  L_DBG, "serial.sys: add port 0x%x failed\n", [io_addr]
         invoke  KernelFree, edi
 
   .free_port:
@@ -357,7 +357,7 @@ proc int_handler c uses ebx esi edi, desc:dword
 endp
 
 proc drv_startup stdcall, desc:dword
-        DEBUGF  L_DBG, "Serial: open 0x%x\n", [desc]
+        DEBUGF  L_DBG, "serial.sys: open 0x%x\n", [desc]
         mov     ecx, [desc]
         mov     edx, [ecx + port.io_addr]
 
@@ -378,7 +378,7 @@ proc drv_startup stdcall, desc:dword
 endp
 
 proc drv_shutdown stdcall, desc:dword
-        DEBUGF  L_DBG, "Serial: close 0x%x\n", [desc]
+        DEBUGF  L_DBG, "serial.sys: close 0x%x\n", [desc]
         ; disable interrupts
         mov     ecx, [desc]
         mov     edx, [ecx + port.io_addr]

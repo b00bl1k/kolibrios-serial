@@ -47,7 +47,7 @@ serial_init:
 ;         call    new_sys_threads
 ;         test    eax, eax
 ;         jns     @f
-;         DEBUGF  1, "K : Cannot create kernel thread for serial, error %d\n", eax
+;         DEBUGF  1, "K : serial - cannot create kernel thread for serial, error %d\n", eax
 ;         jmp     .exit
 ; @@:
 
@@ -62,7 +62,7 @@ serial_init:
         stdcall get_service, serial_drv_name
         test    eax, eax
         jnz     .exit
-        DEBUGF  1, "K : Standard serial driver is not loaded\n"
+        DEBUGF  1, "K : serial - standard serial driver is not loaded\n"
 
 .exit:
         ret
@@ -150,7 +150,7 @@ proc serial_add_port stdcall uses edi, port:dword
         call    mutex_init
         ; write to slot
         mov     [edi], eax
-        DEBUGF  1, "K : Added serial port 0x%x\n", [port]
+        DEBUGF  1, "K : serial - added serial port 0x%x\n", [port]
         ; save result 0 - no error
         xor     eax, eax
         push    eax
@@ -318,7 +318,7 @@ serial_open:
         test    eax, eax
         jz      .err
 
-        DEBUGF  1, "Serial: created object 0x%x\n", eax
+        DEBUGF  1, "K : serial - created object 0x%x\n", eax
         mov     [eax + serial_con.magic], 'UART'
         mov     [eax + serial_con.destroy], serial_close.destroy
         mov     [eax + serial_con.hport], esi
@@ -328,7 +328,6 @@ serial_open:
         and     [esi + serial_port.ev_mask], 0
 
         ; tell driver about port open
-        DEBUGF  1, "K : drv open port\n"
         mov     ebx, [esi + serial_port.funcs]
         push    eax
         stdcall dword [ebx + serial_funcs.startup], esi
@@ -374,13 +373,14 @@ serial_close:
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_lock
         pop     eax
+        DEBUGF  1, "K : serial - destroy object 0x%x\n", eax
         call    destroy_kernel_object
 
         and     [esi + serial_port.con], 0
         ; tell driver about port close
         mov     ebx, [esi + serial_port.funcs]
         push    eax
-        stdcall dword [ebx + serial_funcs.shutdown], eax
+        stdcall dword [ebx + serial_funcs.shutdown], esi
         pop     eax
 
         lea     ecx, [esi + serial_port.mtx]

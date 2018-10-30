@@ -76,13 +76,13 @@ button:
 
 .open:
         mcall   78, 0x0000
-        DEBUGF  1, "Serial open result: 0x%x 0x%x\n", eax, ecx
+        DEBUGF  1, "sertest: open result: 0x%x 0x%x\n", eax, ecx
         mov     [port], ecx
         jmp     event_wait
 
 .close:
         mcall   78, 0x01, [port]
-        DEBUGF  1, "Serial close result: 0x%x\n", eax
+        DEBUGF  1, "sertest: close result: 0x%x\n", eax
         jmp     event_wait
 
 .status:
@@ -93,11 +93,11 @@ button:
         test    eax, eax
         jnz     event_wait
 
-        DEBUGF  1, "Serial status result: 0x%x\n", eax
+        DEBUGF  1, "sertest: status result: 0x%x\n", eax
         mov     eax, [stat + serial_status.baudrate]
-        DEBUGF  1, "Serial baudrate: %d\n", eax
+        DEBUGF  1, "sertest: baudrate: %d\n", eax
         mov     ax, [stat + serial_status.rx_count]
-        DEBUGF  1, "Serial rx_count: %d\n", ax
+        DEBUGF  1, "sertest: rx_count: %d\n", ax
         test    ax, ax
         jz      event_wait
 
@@ -105,7 +105,7 @@ button:
         mcall   78, 0x0005, [port], 10
         lea     edi, [ecx + test_buf]
         mov     byte [edi], 0
-        DEBUGF  1, "Serial read result: eax=0x%x ecx=0x%x\n", eax, ecx
+        DEBUGF  1, "sertest: read result: eax=0x%x ecx=0x%x\n", eax, ecx
 
         call    draw_window
         jmp     event_wait
