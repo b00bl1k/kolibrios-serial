@@ -74,7 +74,7 @@ proc serial_thread_proc
         call    create_event
         test    eax, eax
         jnz     @f
-        DEBUGF  1, "Cannot create event for serial thread\n"
+        DEBUGF  1, "K : serial - cannot create event\n"
         or      [serial_event], -1
         jmp     sys_end
   @@:
@@ -379,9 +379,7 @@ serial_close:
         and     [esi + serial_port.con], 0
         ; tell driver about port close
         mov     ebx, [esi + serial_port.funcs]
-        push    eax
         stdcall dword [ebx + serial_funcs.shutdown], esi
-        pop     eax
 
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_unlock
