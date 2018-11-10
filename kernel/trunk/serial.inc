@@ -109,20 +109,22 @@ proc serial_add_port stdcall uses edi, port:dword
 
   @@:
         ; create rx and tx ring buffers
-        lea     eax, [edi + serial_port.rx_buf]
-        stdcall serial_create_ring_buf, eax
+        lea     ecx, [edi + serial_port.rx_buf]
+        mov     edx, SERIAL_RING_BUF_SIZE shr 12
+        call    ring_buf_create
         test    eax, eax
         jnz     @f
         mov     eax, SERIAL_DRV_ERR_NO_MEM
         ret
 
   @@:
-        lea     eax, [edi + serial_port.tx_buf]
-        stdcall serial_create_ring_buf, eax
+        lea     ecx, [edi + serial_port.tx_buf]
+        mov     edx, SERIAL_RING_BUF_SIZE shr 12
+        call    ring_buf_create
         test    eax, eax
         jnz     @f
-        mov     eax, [edi + serial_port.rx_buf + ring_buf.start_ptr]
-        call    free
+        lea     ecx, [edi + serial_port.tx_buf]
+        call    ring_buf_destroy
         mov     eax, SERIAL_DRV_ERR_NO_MEM
         ret
 
@@ -182,80 +184,6 @@ endl
         mov     ebx, [eax + EVENT.id]
         xor     edx, edx
         call    raise_event
-        ret
-endp
-
-proc serial_create_ring_buf stdcall uses esi, rb_ptr
-        mov     esi, [rb_ptr]
-        movi    eax, SERIAL_RING_BUF_SIZE
-        call    malloc
-        test    eax, eax
-        jz      .exit
-
-        lea     ecx, [esi + ring_buf.mutex]
-        call    mutex_init
-
-        mov     [esi + ring_buf.start_ptr], eax
-        mov     [esi + ring_buf.write_ptr], eax
-        mov     [esi + ring_buf.read_ptr], eax
-        mov     [esi + ring_buf.size], 0
-        add     eax, SERIAL_RING_BUF_SIZE
-        mov     [esi + ring_buf.end_ptr], eax
-        mov     eax, esi
-
-  .exit:
-        ret
-endp
-
-;-----------------------------------------------------------------;
-;                                                                 ;
-; serial_ring_buf_read: Read from ring buffer                     ;
-;                                                                 ;
-;   IN: eax = ring struct ptr                                     ;
-;       ecx = bytes to read                                       ;
-;       edi = ptr to buffer start                                 ;
-;                                                                 ;
-;  OUT: eax = unchanged                                           ;
-;       ecx = number of bytes read (0 on error)                   ;
-;       edx = destroyed                                           ;
-;       esi = destroyed                                           ;
-;       edi = ptr to buffer end                                   ;
-;                                                                 ;
-;-----------------------------------------------------------------;
-proc serial_ring_buf_read
-        DEBUGF  1, "serial_ring_buf_read: ringbuff=%x ptr=%x size=%u\n", eax, edi, ecx
-
-        mov     esi, [eax + ring_buf.read_ptr]
-        mov     edx, [eax + ring_buf.size]
-
-        cmp     ecx, edx
-        jle     @f
-        ; less than request
-        mov     ecx, edx
-  @@:
-        DEBUGF  1, "serial_ring_buf_read: %u bytes from %x to %x\n", ecx, esi, edi
-        push    ecx
-        shr     ecx, 1
-        jnc     .nb
-        movsb
-  .nb:
-        shr     ecx, 1
-        jnc     .nw
-        movsw
-  .nw:
-        test    ecx, ecx
-        jz      .nd
-        rep movsd
-  .nd:
-        pop     ecx
-
-        sub     [eax + ring_buf.size], ecx
-        add     [eax + ring_buf.read_ptr], ecx
-        mov     edx, [eax + ring_buf.end_ptr]
-        cmp     [eax + ring_buf.read_ptr], edx
-        jb      @f
-        sub     [eax + ring_buf.read_ptr], SERIAL_RING_BUF_SIZE
-  @@:
         ret
 endp
 
@@ -389,18 +317,15 @@ serial_close:
 
 align 4
 serial_get_status:
+        test    edi, edi
+        jz      .fail
         cmp     [ecx + serial_con.magic], 'UART'
-        je      @f
-        or      eax, -1
-        ret
+        jne     .fail
 
-  @@:
         movzx   ebx, byte [edi + serial_status.size]
         cmp     ebx, sizeof.serial_status
-        jae     @f
-        mov     eax, -2 ; invalid size of structure
-        ret
-  @@:
+        jb      .fail
+
         mov     esi, [ecx + serial_con.hport]
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_lock
@@ -408,13 +333,17 @@ serial_get_status:
         mov     ebx, 115200
         mov     [edi + serial_status.baudrate], ebx
 
-        mov     eax, [esi + serial_port.rx_buf + ring_buf.size]
+        lea     ecx, [esi + serial_port.rx_buf]
+        call    ring_buf_count
         mov     [edi + serial_status.rx_count], ax
 
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_unlock
 
         xor     eax, eax
+        ret
+.fail:
+        or      eax, -1
         ret
 
 align 4
@@ -429,28 +358,26 @@ serial_get_ev_mask:
 
 align 4
 serial_read:
+        test    edi, edi
+        jz      .fail
+        test    edx, edx
+        jz      .fail
         cmp     [ecx + serial_con.magic], 'UART'
-        je      @f
-        or      eax, -1
-        ret
+        jne     .fail
 
-  @@:
         mov     esi, [ecx + serial_con.hport]
+        mov     ebx, edx
         lea     ecx, [esi + serial_port.mtx]
-        push    edx
         call    mutex_lock
-        pop     ecx
         spin_lock_irqsave
-        lea     eax, [esi + serial_port.rx_buf]
-        push    esi
-        call    serial_ring_buf_read
-        pop     esi
+        lea     ecx, [esi + serial_port.rx_buf]
+        stdcall ring_buf_peek, ecx, edi, 0, ebx
         spin_unlock_irqrestore
-
-        mov     dword [esp + 32], ecx
-
+        mov     dword [esp + SYSCALL_STACK._ecx + 4], eax
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_unlock
-
         and     eax, 0
+        ret
+.fail:
+        or      eax, -1
         ret

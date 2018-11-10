@@ -89,7 +89,6 @@ section '.flat' readable writable executable
 include '../struct.inc'
 include '../proc32.inc'
 include '../fdo.inc'
-include '../struct.inc'
 include '../macros.inc'
 include '../peimport.inc'
 
@@ -99,6 +98,14 @@ struct  APPOBJ                  ; common object header
         fd              dd ?    ; next object in list
         bk              dd ?    ; prev object in list
         pid             dd ?    ; owner id
+ends
+
+struct  RING_BUF
+        start_ptr       dd ?   ; Pointer to start of buffer
+        end_ptr         dd ?   ; Pointer to end of buffer
+        read_ptr        dd ?   ; Read pointer
+        write_ptr       dd ?   ; Write pointer
+        size            dd ?   ; Size of buffer
 ends
 
 include '../../kernel/trunk/serial-common.inc'
@@ -181,7 +188,7 @@ proc service_proc stdcall, ioctl:dword
         ret
 endp
 
-proc add_port stdcall uses ebx edi, io_addr:dword, irqn:dword
+proc add_port stdcall uses ebx esi edi, io_addr:dword, irqn:dword
         xor     ebx, ebx ; 0 = reserve
         mov     ecx, [io_addr]
         lea     edx, [ecx + 7]
@@ -317,12 +324,13 @@ proc int_handler c uses ebx esi edi, desc:dword
         ; read byte
         rd_reg  THR_REG
 
-        mov     edi, [esi + port.rx_buf + ring_buf.write_ptr]
-        sub     edi, [esi + port.rx_buf + ring_buf.start_ptr]
+        mov     edi, [esi + port.rx_buf + RING_BUF.write_ptr]
         inc     edi
-        and     edi, SERIAL_RING_BUF_SIZE - 1
-        add     edi, [esi + port.rx_buf + ring_buf.start_ptr]
-        cmp     edi, [esi + port.rx_buf + ring_buf.read_ptr]
+        cmp     edi, [esi + port.rx_buf + RING_BUF.end_ptr]
+        jnz     @f
+        mov     edi, [esi + port.rx_buf + RING_BUF.start_ptr]
+  @@:
+        cmp     edi, [esi + port.rx_buf + RING_BUF.read_ptr]
         jnz     .put_byte
 
         ; TODO: Overflow. Read all bytes from uart and exit
@@ -331,11 +339,10 @@ proc int_handler c uses ebx esi edi, desc:dword
 
   .put_byte:
         push    edi
-        mov     edi, [esi + port.rx_buf + ring_buf.write_ptr]
+        mov     edi, [esi + port.rx_buf + RING_BUF.write_ptr]
         mov     byte [edi], al
         pop     edi
-        inc     [esi + port.rx_buf + ring_buf.size]
-        mov     [esi + port.rx_buf + ring_buf.write_ptr], edi
+        mov     [esi + port.rx_buf + RING_BUF.write_ptr], edi
 
   .skip:
         ; check for more recevied bytes
