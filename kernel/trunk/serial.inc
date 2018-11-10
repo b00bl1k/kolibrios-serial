@@ -371,7 +371,7 @@ serial_read:
         call    mutex_lock
         spin_lock_irqsave
         lea     ecx, [esi + serial_port.rx_buf]
-        stdcall ring_buf_peek, ecx, edi, 0, ebx
+        stdcall ring_buf_read, ecx, edi, ebx
         spin_unlock_irqrestore
         mov     dword [esp + SYSCALL_STACK._ecx + 4], eax
         lea     ecx, [esi + serial_port.mtx]

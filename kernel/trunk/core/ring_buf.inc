@@ -163,6 +163,47 @@ proc ring_buf_write stdcall uses esi edi, buf, src, size
         ret
 endp
 
+;u32 __stdcall ring_buf_read(struct RING_BUF *buf, u32 *dst, u32 size)
+align 4
+proc ring_buf_read stdcall uses esi edi, buf, dst, size
+        mov     ecx, [buf]
+        push    ecx
+        call    ring_buf_count
+        pop     ecx
+
+        mov     esi, [ecx + RING_BUF.read_ptr]
+        mov     edi, [dst]
+        mov     ecx, [size]
+        cmp     ecx, eax
+        jbe     .copy
+        mov     ecx, eax
+.copy:
+        DEBUGF  1, "ring_buf_read: copy %d bytes from 0x%x to 0x%x\n", ecx, esi, edi
+        mov     eax, ecx
+        shr     ecx, 1
+        jnc     .nb
+        cld
+        movsb
+.nb:
+        shr     ecx, 1
+        jnc     .nw
+        movsw
+.nw:
+        test    ecx, ecx
+        jz      .nd
+        rep movsd
+.nd:
+        mov     ecx, [buf]
+        cmp     esi, [ecx + RING_BUF.end_ptr]
+        jb      .save_ptr
+        sub     esi, [ecx + RING_BUF.size]
+.save_ptr:
+        mov     [ecx + RING_BUF.read_ptr], esi
+        ret
+.nothing:
+        xor     eax, eax
+        ret
+endp
 
 ;u32 __fastcall ring_buf_discard(struct RING_BUF *buf, u32 size)
 align 4
