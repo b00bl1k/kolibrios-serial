@@ -31,6 +31,7 @@ serial_api:
         dd serial_set_ev_mask
         dd serial_get_ev_mask
         dd serial_read
+        dd serial_write
 serial_api_end:
 endg
 
@@ -205,7 +206,7 @@ syscall_serial:
         call    dword [serial_api + eax * 4]
 
   .exit:
-        mov     dword [esp + 32], eax
+        mov     dword [esp + SYSCALL_STACK._eax], eax
         ret
 
 ; In:
@@ -262,7 +263,7 @@ serial_open:
         pop     eax
 
         ; return port handle in ecx
-        mov     dword [esp + 32], eax
+        mov     dword [esp + SYSCALL_STACK._ecx + 4], eax
         xor     eax, eax
         jmp     .unlock_port
 
@@ -335,14 +336,18 @@ serial_get_status:
 
         lea     ecx, [esi + serial_port.rx_buf]
         call    ring_buf_count
-        mov     [edi + serial_status.rx_count], ax
+        mov     [edi + serial_status.rx_count], eax
+
+        lea     ecx, [esi + serial_port.tx_buf]
+        call    ring_buf_free
+        mov     [edi + serial_status.tx_free], eax
 
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_unlock
 
         xor     eax, eax
         ret
-.fail:
+  .fail:
         or      eax, -1
         ret
 
@@ -378,6 +383,37 @@ serial_read:
         call    mutex_unlock
         and     eax, 0
         ret
-.fail:
+  .fail:
+        or      eax, -1
+        ret
+
+align 4
+serial_write:
+        test    esi, esi
+        jz      .fail
+        test    edx, edx
+        jz      .fail
+        cmp     [ecx + serial_con.magic], 'UART'
+        jne     .fail
+
+        mov     edi, [ecx + serial_con.hport]
+        mov     ebx, edx
+        lea     ecx, [edi + serial_port.mtx]
+        call    mutex_lock
+
+        spin_lock_irqsave
+        lea     ecx, [edi + serial_port.tx_buf]
+        stdcall ring_buf_write, ecx, esi, ebx
+        spin_unlock_irqrestore
+        mov     dword [esp + SYSCALL_STACK._ecx + 4], eax
+
+        mov     ebx, [edi + serial_port.funcs]
+        stdcall dword [ebx + serial_funcs.start_tx], edi
+
+        lea     ecx, [edi + serial_port.mtx]
+        call    mutex_unlock
+        and     eax, 0
+        ret
+  .fail:
         or      eax, -1
         ret

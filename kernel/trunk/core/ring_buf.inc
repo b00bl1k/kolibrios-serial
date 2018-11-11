@@ -171,6 +171,9 @@ proc ring_buf_read stdcall uses esi edi, buf, dst, size
         call    ring_buf_count
         pop     ecx
 
+        test    eax, eax
+        jz      .nothing
+
         mov     esi, [ecx + RING_BUF.read_ptr]
         mov     edi, [dst]
         mov     ecx, [size]

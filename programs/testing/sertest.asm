@@ -16,6 +16,7 @@ __DEBUG_LEVEL__ equ 1
 BTN_OPEN_ID = 2
 BTN_CLOSE_ID = 3
 BTN_STATUS_ID = 4
+BTN_WRITE_ID = 5
 
 include '../macros.inc'
 include '../debug-fdo.inc'
@@ -23,10 +24,10 @@ include '../KOSfuncs.inc'
 include '../struct.inc'
 
 struct serial_status
-        size            db ? ; sizeof this struct
-        baudrate        dd ? ; current baudrate
-        rx_count        dw ? ; bytes count in rx fifo
-        tx_count        dw ? ; bytes count in tx fifo
+        size            db ?
+        baudrate        dd ?
+        rx_count        dd ?
+        tx_free         dd ?
         dtr             db ?
         rts             db ?
         cts             db ?
@@ -72,6 +73,8 @@ button:
         jz      .close
         cmp     ah, BTN_STATUS_ID
         jz      .status
+        cmp     ah, BTN_WRITE_ID
+        jz      .write
         jmp     event_wait
 
 .open:
@@ -96,9 +99,11 @@ button:
         DEBUGF  1, "sertest: status result: 0x%x\n", eax
         mov     eax, [stat + serial_status.baudrate]
         DEBUGF  1, "sertest: baudrate: %d\n", eax
-        mov     ax, [stat + serial_status.rx_count]
-        DEBUGF  1, "sertest: rx_count: %d\n", ax
-        test    ax, ax
+        mov     eax, [stat + serial_status.tx_free]
+        DEBUGF  1, "sertest: tx_free: %d\n", eax
+        mov     eax, [stat + serial_status.rx_count]
+        DEBUGF  1, "sertest: rx_count: %d\n", eax
+        test    eax, eax
         jz      event_wait
 
         mov     edi, test_buf
@@ -108,6 +113,12 @@ button:
         DEBUGF  1, "sertest: read result: eax=0x%x ecx=0x%x\n", eax, ecx
 
         call    draw_window
+        jmp     event_wait
+
+.write:
+        mov     esi, test_string
+        mcall   78, 0x0006, [port], 5
+        DEBUGF  1, "sertest: write result: eax=0x%x ecx=0x%x\n", eax, ecx
         jmp     event_wait
 
 .exit:
@@ -141,6 +152,12 @@ draw_window:
         mov     esi, [sc.work_button]
         mcall   SF_DEFINE_BUTTON
 
+        mov     ebx, 5 * 65536 + 100
+        mov     ecx, 95 * 65536 + 25
+        mov     edx, BTN_WRITE_ID
+        mov     esi, [sc.work_button]
+        mcall   SF_DEFINE_BUTTON
+
         mov     ecx, [sc.work_button_text]
         or      ecx, 0x90000000
         mov     edx, btn_open_cap
@@ -156,10 +173,15 @@ draw_window:
         mov     edx, btn_status_cap
         mcall   SF_DRAW_TEXT, (5 + (100 - 6 * 8) / 2) shl 16 + 70
 
+        mov     ecx, [sc.work_button_text]
+        or      ecx, 0x90000000
+        mov     edx, btn_write_cap
+        mcall   SF_DRAW_TEXT, (5 + (100 - 5 * 8) / 2) shl 16 + 100
+
         mov     ecx, [sc.work_text]
         or      ecx, 0x90000000
         mov     edx, test_buf
-        mcall   SF_DRAW_TEXT, 5 shl 16 + 110
+        mcall   SF_DRAW_TEXT, 5 shl 16 + 150
 
         mcall   SF_REDRAW, SSF_END_DRAW
 
@@ -169,6 +191,9 @@ title           db "Serial Test", 0
 btn_open_cap    db "Open", 0
 btn_close_cap   db "Close", 0
 btn_status_cap  db "Status", 0
+btn_write_cap   db "Write", 0
+
+test_string     db "Hello world!", 0
 
 include_debug_strings
 

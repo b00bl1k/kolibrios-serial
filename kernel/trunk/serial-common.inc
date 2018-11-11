@@ -22,6 +22,8 @@ struct serial_funcs
         size            dd ?
         startup         dd ?
         shutdown        dd ?
+        start_tx        dd ?
+        stop_tx         dd ?
 ends
 
 struct serial_con APPOBJ
@@ -40,8 +42,8 @@ ends
 struct serial_status
         size            db ? ; sizeof this struct
         baudrate        dd ? ; current baudrate
-        rx_count        dw ? ; bytes count in rx fifo
-        tx_count        dw ? ; bytes count in tx fifo
+        rx_count        dd ? ; bytes count in rx fifo
+        tx_free         dd ? ; free space in tx fifo
         dtr             db ?
         rts             db ?
         cts             db ?

@@ -318,6 +318,25 @@ proc int_handler c uses ebx esi edi, desc:dword
 
   .xmit:
         ; write byte or disable THRE int
+        mov     edi, [esi + port.tx_buf + RING_BUF.read_ptr]
+        cmp     edi, [esi + port.tx_buf + RING_BUF.write_ptr]
+        jne     .tx_byte
+
+        ; disable THR empty interrupt
+        rd_reg  IER_REG
+        and     ax, not IER_THRI
+        wr_reg  IER_REG
+        jmp     .read_iir
+
+  .tx_byte:
+        mov     al, byte [edi]
+        inc     edi
+        cmp     edi, [esi + port.tx_buf + RING_BUF.end_ptr]
+        jnz     @f
+        mov     edi, [esi + port.tx_buf + RING_BUF.start_ptr]
+  @@:
+        mov     [esi + port.tx_buf + RING_BUF.read_ptr], edi
+        wr_reg  THR_REG
         jmp     .read_iir
 
   .recv:
@@ -394,6 +413,26 @@ proc drv_shutdown stdcall, desc:dword
         ret
 endp
 
+proc drv_start_tx stdcall, desc:dword
+        DEBUGF  L_DBG, "serial.sys: start_tx 0x%x\n", [desc]
+        mov     ecx, [desc]
+        mov     edx, [ecx + port.io_addr]
+        rd_reg  IER_REG
+        or      ax, IER_THRI
+        wr_reg  IER_REG
+        ret
+endp
+
+proc drv_stop_tx stdcall, desc:dword
+        DEBUGF  L_DBG, "serial.sys: stop_tx 0x%x\n", [desc]
+        mov     ecx, [desc]
+        mov     edx, [ecx + port.io_addr]
+        rd_reg  IER_REG
+        and     ax, not IER_THRI
+        wr_reg  IER_REG
+        ret
+endp
+
 proc drv_read_sr stdcall, desc:dword
         mov     ecx, [desc]
         mov     edx, [ecx + port.io_addr]
@@ -429,6 +468,8 @@ drv_funcs:
         dd drv_funcs_end - drv_funcs
         dd drv_startup
         dd drv_shutdown
+        dd drv_start_tx
+        dd drv_stop_tx
 drv_funcs_end:
 
 include_debug_strings
