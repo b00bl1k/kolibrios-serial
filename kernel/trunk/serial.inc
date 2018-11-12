@@ -9,6 +9,10 @@ SERIAL_PORTS_MAX = 64
 
 include 'serial-common.inc'
 
+struct serial_con APPOBJ
+        hport           dd ? ; pointer to serial_port
+ends
+
 uglobal
 align 4
 ; list of serial ports
@@ -95,13 +99,11 @@ proc serial_thread_proc
         jmp     .wait_ev
 endp
 
-; __stdcall u32 SerialAddPort(struct serial_port * port);
+; __stdcall u32 SerialAddPort(struct serial_port * port, struct serial_funcs * funcs);
 ; return 0 if ok, otherwise err code
-proc serial_add_port stdcall uses edi, port:dword
-        ; check descriptor
-        mov     edi, [port]
-        ; 1. sizeof funcs table
-        mov     ecx, [edi + serial_port.funcs]
+proc serial_add_port stdcall uses edi, port:dword, funcs:dword
+        ; check sizeof funcs table
+        mov     ecx, [funcs]
         mov     eax, [ecx + serial_funcs.size]
         cmp     eax, sizeof.serial_funcs
         jz      @f
@@ -109,6 +111,14 @@ proc serial_add_port stdcall uses edi, port:dword
         ret
 
   @@:
+        mov     edi, [port]
+        mov     [edi + serial_port.funcs], ecx
+        lea     ecx, [edi + serial_port.mtx]
+        call    mutex_init
+        xor     ecx, ecx
+        mov     [edi + serial_port.con], ecx
+        mov     [edi + serial_port.ev_mask], ecx
+
         ; create rx and tx ring buffers
         lea     ecx, [edi + serial_port.rx_buf]
         mov     edx, SERIAL_RING_BUF_SIZE shr 12
@@ -148,10 +158,6 @@ proc serial_add_port stdcall uses edi, port:dword
         ; store pointer to the port descriptor
         sub     edi, 4
         mov     eax, [port]
-        ; initialize fields of descriptor
-        lea     ecx, [eax + serial_port.mtx]
-        call    mutex_init
-        ; write to slot
         mov     [edi], eax
         DEBUGF  1, "K : serial - added serial port 0x%x\n", [port]
         ; save result 0 - no error

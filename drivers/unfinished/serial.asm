@@ -167,17 +167,17 @@ proc START c, state:dword, cmdline:dword
 endp
 
 proc service_proc stdcall, ioctl:dword
-        mov     edi, [ioctl]
-        mov     eax, [edi + IOCTL.io_code]
+        mov     edx, [ioctl]
+        mov     eax, [edx + IOCTL.io_code]
         test    eax, eax
         jz      .getversion
         jmp     .err
 
   .getversion:
-        cmp     [edi + IOCTL.out_size], 4
+        cmp     [edx + IOCTL.out_size], 4
         jb      .err
-        mov     edi, [edi + IOCTL.output]
-        mov     dword [edi], API_VERSION
+        mov     edx, [edx + IOCTL.output]
+        mov     dword [edx], API_VERSION
 
   .ok:
         xor     eax, eax
@@ -239,18 +239,6 @@ proc add_port stdcall uses ebx esi edi, io_addr:dword, irqn:dword
         jz      .free_port
 
         mov     edi, eax
-        push    edi
-
-        ; clear allocated memory
-        xor     eax, eax
-        mov     ecx, sizeof.port
-        cld
-        rep stosb
-        pop     edi
-
-        ; fill
-        mov     eax, drv_funcs
-        mov     [edi + port.funcs], eax
         mov     eax, [io_addr]
         mov     [edi + port.io_addr], eax
 
@@ -259,7 +247,7 @@ proc add_port stdcall uses ebx esi edi, io_addr:dword, irqn:dword
         jz      .free_mem
 
         ; add device
-        invoke  SerialAddPort, edi
+        invoke  SerialAddPort, edi, drv_funcs
         test    eax, eax
         jnz     .free_mem
 
@@ -417,9 +405,11 @@ proc drv_start_tx stdcall, desc:dword
         DEBUGF  L_DBG, "serial.sys: start_tx 0x%x\n", [desc]
         mov     ecx, [desc]
         mov     edx, [ecx + port.io_addr]
+        spin_lock_irqsave
         rd_reg  IER_REG
         or      ax, IER_THRI
         wr_reg  IER_REG
+        spin_unlock_irqrestore
         ret
 endp
 
@@ -427,9 +417,11 @@ proc drv_stop_tx stdcall, desc:dword
         DEBUGF  L_DBG, "serial.sys: stop_tx 0x%x\n", [desc]
         mov     ecx, [desc]
         mov     edx, [ecx + port.io_addr]
+        spin_lock_irqsave
         rd_reg  IER_REG
         and     ax, not IER_THRI
         wr_reg  IER_REG
+        spin_unlock_irqrestore
         ret
 endp
 

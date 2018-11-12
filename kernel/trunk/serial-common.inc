@@ -26,10 +26,6 @@ struct serial_funcs
         stop_tx         dd ?
 ends
 
-struct serial_con APPOBJ
-        hport           dd ? ; pointer to serial_port
-ends
-
 struct serial_port
         mtx             MUTEX
         con             dd ? ; pointer to serial_con, if port is opened, otherwise null
