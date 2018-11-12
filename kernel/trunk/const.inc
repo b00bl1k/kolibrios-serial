@@ -5,7 +5,7 @@
 ;;                                                              ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-$Revision: 7136 $
+$Revision: 7522 $
 
 
 dpl0    =  10010000b      ; data read       dpl0
@@ -740,6 +740,9 @@ end virtual
 virtual at OS_BASE + BOOT_VARS
         BOOT boot_data
 end virtual
+
+MAX_SCREEN_WIDTH  = 3840
+MAX_SCREEN_HEIGHT = 2160
 
 struct  display_t
         x               dd ?
