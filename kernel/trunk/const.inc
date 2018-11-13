@@ -383,14 +383,6 @@ struct  LHEAD
         prev            dd ?   ;prev object in list
 ends
 
-struct  RING_BUF
-        start_ptr       dd ?   ; Pointer to start of buffer
-        end_ptr         dd ?   ; Pointer to end of buffer
-        read_ptr        dd ?   ; Read pointer
-        write_ptr       dd ?   ; Write pointer
-        size            dd ?   ; Size of buffer
-ends
-
 struct  MUTEX_WAITER
         list    LHEAD
         task    dd ?

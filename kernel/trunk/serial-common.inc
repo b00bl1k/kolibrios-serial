@@ -13,26 +13,15 @@ SERIAL_API_ERR_PORT_INVALID = 1
 SERIAL_API_ERR_PORT_BUSY = 2
 SERIAL_API_ERR_ACCESS = 3
 
-SERIAL_RING_BUF_SIZE = 4096
-
 SERIAL_SR_RXNE = 0x01 ; RX buffer is not empty
 SERIAL_SR_TXE = 0x02 ; TX buffer is empty
 
 struct serial_funcs
-        size            dd ?
-        startup         dd ?
-        shutdown        dd ?
-        start_tx        dd ?
-        stop_tx         dd ?
-ends
-
-struct serial_port
-        mtx             MUTEX
-        con             dd ? ; pointer to serial_con, if port is opened, otherwise null
-        funcs           dd ? ; pointer to struct serial_funcs
-        ev_mask         dd ? ; event mask for process
-        rx_buf          RING_BUF
-        tx_buf          RING_BUF
+        size            dd ? ; sizeof this struct
+        startup         dd ? ; void __stdcall ( *startup)(void * user_data);
+        shutdown        dd ? ; void __stdcall ( *shutdown)(void * user_data);
+        read            dd ? ; u32 __stdcall ( *read)(void * user_data, void * dst, u32 size);
+        write           dd ? ; u32 __stdcall ( *write)(void * user_data, const void * src, u32 size);
 ends
 
 struct serial_status

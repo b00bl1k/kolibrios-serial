@@ -13,6 +13,14 @@ struct serial_con APPOBJ
         hport           dd ? ; pointer to serial_port
 ends
 
+struct serial_port
+        mtx             MUTEX
+        con             dd ? ; pointer to serial_con, if port is opened, otherwise null
+        funcs           dd ? ; pointer to struct serial_funcs
+        ev_mask         dd ? ; event mask for process
+        user_data       dd ?
+ends
+
 uglobal
 align 4
 ; list of serial ports
@@ -99,47 +107,31 @@ proc serial_thread_proc
         jmp     .wait_ev
 endp
 
-; __stdcall u32 SerialAddPort(struct serial_port * port, struct serial_funcs * funcs);
-; return 0 if ok, otherwise err code
-proc serial_add_port stdcall uses edi, port:dword, funcs:dword
+; __stdcall void * SerialAddPort(void * user_data, struct serial_funcs * funcs);
+; return NULL on error
+proc serial_add_port stdcall uses esi edi, user_data:dword, funcs:dword
         ; check sizeof funcs table
         mov     ecx, [funcs]
         mov     eax, [ecx + serial_funcs.size]
         cmp     eax, sizeof.serial_funcs
-        jz      @f
-        mov     eax, SERIAL_DRV_ERR_PORT_DESC
-        ret
-
-  @@:
-        mov     edi, [port]
+        jne     .fail
+        ; alloc memory for serial port descriptor
+        movi    eax, sizeof.serial_port
+        call    malloc
+        test    eax, eax
+        jz      .fail
+        ; initialize fields of descriptor
+        mov     edi, eax
+        mov     ecx, [funcs]
         mov     [edi + serial_port.funcs], ecx
+        mov     ecx, [user_data]
+        mov     [edi + serial_port.user_data], ecx
         lea     ecx, [edi + serial_port.mtx]
         call    mutex_init
         xor     ecx, ecx
         mov     [edi + serial_port.con], ecx
         mov     [edi + serial_port.ev_mask], ecx
-
-        ; create rx and tx ring buffers
-        lea     ecx, [edi + serial_port.rx_buf]
-        mov     edx, SERIAL_RING_BUF_SIZE shr 12
-        call    ring_buf_create
-        test    eax, eax
-        jnz     @f
-        mov     eax, SERIAL_DRV_ERR_NO_MEM
-        ret
-
-  @@:
-        lea     ecx, [edi + serial_port.tx_buf]
-        mov     edx, SERIAL_RING_BUF_SIZE shr 12
-        call    ring_buf_create
-        test    eax, eax
-        jnz     @f
-        lea     ecx, [edi + serial_port.tx_buf]
-        call    ring_buf_destroy
-        mov     eax, SERIAL_DRV_ERR_NO_MEM
-        ret
-
-  @@:
+        mov     esi, edi
         ; get access to list
         mov     ecx, serial_ports_mutex
         call    mutex_lock
@@ -148,27 +140,22 @@ proc serial_add_port stdcall uses edi, port:dword, funcs:dword
         mov     ecx, SERIAL_PORTS_MAX
         mov     edi, serial_ports
         repne scasd
-        jz      .found_slot
-        ; save error code
-        mov     eax, SERIAL_DRV_ERR_PORT_COUNT
-        push    eax
-        jmp     .unlock
-
-  .found_slot:
+        jnz     .slot_err
         ; store pointer to the port descriptor
         sub     edi, 4
-        mov     eax, [port]
-        mov     [edi], eax
-        DEBUGF  1, "K : serial - added serial port 0x%x\n", [port]
-        ; save result 0 - no error
-        xor     eax, eax
-        push    eax
-
-  .unlock:
+        mov     [edi], esi
+        DEBUGF  1, "K : serial - added serial port 0x%x, udata 0x%x\n", esi, [user_data]
         mov     ecx, serial_ports_mutex
         call    mutex_unlock
-        ; restore error code
-        pop     eax
+        mov     eax, esi
+        ret
+.slot_err:
+        mov     ecx, serial_ports_mutex
+        call    mutex_unlock
+        mov     eax, esi
+        call    free
+.fail:
+        xor     eax, eax
         ret
 endp
 
@@ -296,11 +283,7 @@ align 4
 serial_close:
         xchg    eax, ecx
         cmp     [eax + serial_con.magic], 'UART'
-        je      .destroy
-        ; TODO: more checks?
-        or      eax, -1
-        ret
-
+        jne     .fail
   .destroy:
         ; also called on destroy app object
         mov     esi, [eax + serial_con.hport]
@@ -310,16 +293,16 @@ serial_close:
         pop     eax
         DEBUGF  1, "K : serial - destroy object 0x%x\n", eax
         call    destroy_kernel_object
-
         and     [esi + serial_port.con], 0
         ; tell driver about port close
         mov     ebx, [esi + serial_port.funcs]
         stdcall dword [ebx + serial_funcs.shutdown], esi
-
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_unlock
-
         xor     eax, eax
+        ret
+  .fail:
+        or      eax, -1
         ret
 
 align 4
@@ -328,29 +311,18 @@ serial_get_status:
         jz      .fail
         cmp     [ecx + serial_con.magic], 'UART'
         jne     .fail
-
         movzx   ebx, byte [edi + serial_status.size]
         cmp     ebx, sizeof.serial_status
         jb      .fail
-
         mov     esi, [ecx + serial_con.hport]
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_lock
-
         mov     ebx, 115200
         mov     [edi + serial_status.baudrate], ebx
-
-        lea     ecx, [esi + serial_port.rx_buf]
-        call    ring_buf_count
-        mov     [edi + serial_status.rx_count], eax
-
-        lea     ecx, [esi + serial_port.tx_buf]
-        call    ring_buf_free
-        mov     [edi + serial_status.tx_free], eax
-
+        and     [edi + serial_status.rx_count], 0
+        and     [edi + serial_status.tx_free], 0
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_unlock
-
         xor     eax, eax
         ret
   .fail:
@@ -375,15 +347,13 @@ serial_read:
         jz      .fail
         cmp     [ecx + serial_con.magic], 'UART'
         jne     .fail
-
         mov     esi, [ecx + serial_con.hport]
         mov     ebx, edx
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_lock
-        spin_lock_irqsave
-        lea     ecx, [esi + serial_port.rx_buf]
-        stdcall ring_buf_read, ecx, edi, ebx
-        spin_unlock_irqrestore
+        mov     ecx, [edi + serial_port.user_data]
+        mov     ebx, [edi + serial_port.funcs]
+        stdcall dword [ebx + serial_funcs.read], ecx, edi, ebx
         mov     dword [esp + SYSCALL_STACK._ecx + 4], eax
         lea     ecx, [esi + serial_port.mtx]
         call    mutex_unlock
@@ -401,21 +371,14 @@ serial_write:
         jz      .fail
         cmp     [ecx + serial_con.magic], 'UART'
         jne     .fail
-
         mov     edi, [ecx + serial_con.hport]
         mov     ebx, edx
         lea     ecx, [edi + serial_port.mtx]
         call    mutex_lock
-
-        spin_lock_irqsave
-        lea     ecx, [edi + serial_port.tx_buf]
-        stdcall ring_buf_write, ecx, esi, ebx
-        spin_unlock_irqrestore
-        mov     dword [esp + SYSCALL_STACK._ecx + 4], eax
-
+        mov     ecx, [edi + serial_port.user_data]
         mov     ebx, [edi + serial_port.funcs]
-        stdcall dword [ebx + serial_funcs.start_tx], edi
-
+        stdcall dword [ebx + serial_funcs.write], ecx, esi, ebx
+        mov     dword [esp + SYSCALL_STACK._ecx + 4], eax
         lea     ecx, [edi + serial_port.mtx]
         call    mutex_unlock
         and     eax, 0

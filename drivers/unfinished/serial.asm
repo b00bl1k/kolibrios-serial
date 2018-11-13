@@ -8,8 +8,8 @@
 format PE DLL native 0.05
 entry START
 
-L_DBG = 1
-L_ERR = 2
+L_ERR = 1
+L_DBG = 2
 
 __DEBUG__ = 1
 __DEBUG_LEVEL__ = L_DBG
@@ -84,6 +84,8 @@ MSR_DCD   = 0x80
 MCR_TEST_MASK = MCR_DTR or MCR_RTS or MCR_OUT1 or MCR_OUT2 or MCR_LOOP
 MSR_CHECK_MASK = MSR_CTS or MSR_DSR or MSR_RI or MSR_DCD
 
+SERIAL_RING_BUF_SIZE = 4096
+
 section '.flat' readable writable executable
 
 include '../struct.inc'
@@ -91,27 +93,15 @@ include '../proc32.inc'
 include '../fdo.inc'
 include '../macros.inc'
 include '../peimport.inc'
-
-struct  APPOBJ                  ; common object header
-        magic           dd ?    ;
-        destroy         dd ?    ; internal destructor
-        fd              dd ?    ; next object in list
-        bk              dd ?    ; prev object in list
-        pid             dd ?    ; owner id
-ends
-
-struct  RING_BUF
-        start_ptr       dd ?   ; Pointer to start of buffer
-        end_ptr         dd ?   ; Pointer to end of buffer
-        read_ptr        dd ?   ; Read pointer
-        write_ptr       dd ?   ; Write pointer
-        size            dd ?   ; Size of buffer
-ends
+include '../ring_buf.inc'
 
 include '../../kernel/trunk/serial-common.inc'
 
-struct port serial_port
+struct drv_data
         io_addr         dd ? ; base address of io port
+        handle          dd ? ; serial port handle
+        rx_buf          RING_BUF
+        tx_buf          RING_BUF
 ends
 
 ; dx = base io
@@ -196,12 +186,8 @@ proc add_port stdcall uses ebx esi edi, io_addr:dword, irqn:dword
         invoke  ReservePortArea
         pop     ebp
         test    eax, eax
-        jz      @f
+        jnz     .err
 
-        DEBUGF  L_ERR, "serial.sys: failed to reserve ports\n"
-        jmp     .err
-
-  @@:
         mov     edx, [io_addr]
 
         ; enable loopback
@@ -234,29 +220,50 @@ proc add_port stdcall uses ebx esi edi, io_addr:dword, irqn:dword
         wr_reg  FCR_REG
 
         ; create descriptor
-        invoke  KernelAlloc, sizeof.port
+        mov     eax, sizeof.drv_data
+        invoke  Kmalloc
         test    eax, eax
         jz      .free_port
-
         mov     edi, eax
+        ; create rx and tx ring buffers
+        lea     ecx, [edi + drv_data.rx_buf]
+        mov     edx, SERIAL_RING_BUF_SIZE shr 12
+        call    ring_buf_create
+        test    eax, eax
+        jz      .free_desc
+        lea     ecx, [edi + drv_data.tx_buf]
+        mov     edx, SERIAL_RING_BUF_SIZE shr 12
+        call    ring_buf_create
+        test    eax, eax
+        jz      .free_rx_buf
+
         mov     eax, [io_addr]
-        mov     [edi + port.io_addr], eax
+        mov     [edi + drv_data.io_addr], eax
 
         invoke  AttachIntHandler, [irqn], int_handler, edi
         test    eax, eax
-        jz      .free_mem
+        jz      .free_tx_buf
 
         ; add device
         invoke  SerialAddPort, edi, drv_funcs
         test    eax, eax
-        jnz     .free_mem
+        jz      .free_tx_buf
 
-        mov     eax, edi
+        ; save port handle
+        mov     [edi + drv_data.handle], eax
         ret
 
-  .free_mem:
-        DEBUGF  L_DBG, "serial.sys: add port 0x%x failed\n", [io_addr]
-        invoke  KernelFree, edi
+  .free_tx_buf:
+        lea     ecx, [edi + drv_data.tx_buf]
+        call    ring_buf_destroy
+
+  .free_rx_buf:
+        lea     ecx, [edi + drv_data.rx_buf]
+        call    ring_buf_destroy
+
+  .free_desc:
+        mov     eax, edi
+        invoke  Kfree
 
   .free_port:
         xor     ebx, ebx
@@ -268,13 +275,13 @@ proc add_port stdcall uses ebx esi edi, io_addr:dword, irqn:dword
         pop     ebp
 
   .err:
-        xor     eax, eax
+        DEBUGF  L_DBG, "serial.sys: add port 0x%x failed\n", [io_addr]
         ret
 endp
 
-proc int_handler c uses ebx esi edi, desc:dword
-        mov     esi, [desc]
-        mov     edx, [esi + port.io_addr]
+proc int_handler c uses ebx esi edi, data:dword
+        mov     esi, [data]
+        mov     edx, [esi + drv_data.io_addr]
         xor     ebx, ebx
         ; invoke  SerialWakeUp, [desc]
 
@@ -306,8 +313,8 @@ proc int_handler c uses ebx esi edi, desc:dword
 
   .xmit:
         ; write byte or disable THRE int
-        mov     edi, [esi + port.tx_buf + RING_BUF.read_ptr]
-        cmp     edi, [esi + port.tx_buf + RING_BUF.write_ptr]
+        mov     edi, [esi + drv_data.tx_buf + RING_BUF.read_ptr]
+        cmp     edi, [esi + drv_data.tx_buf + RING_BUF.write_ptr]
         jne     .tx_byte
 
         ; disable THR empty interrupt
@@ -319,11 +326,11 @@ proc int_handler c uses ebx esi edi, desc:dword
   .tx_byte:
         mov     al, byte [edi]
         inc     edi
-        cmp     edi, [esi + port.tx_buf + RING_BUF.end_ptr]
+        cmp     edi, [esi + drv_data.tx_buf + RING_BUF.end_ptr]
         jnz     @f
-        mov     edi, [esi + port.tx_buf + RING_BUF.start_ptr]
+        mov     edi, [esi + drv_data.tx_buf + RING_BUF.start_ptr]
   @@:
-        mov     [esi + port.tx_buf + RING_BUF.read_ptr], edi
+        mov     [esi + drv_data.tx_buf + RING_BUF.read_ptr], edi
         wr_reg  THR_REG
         jmp     .read_iir
 
@@ -331,13 +338,13 @@ proc int_handler c uses ebx esi edi, desc:dword
         ; read byte
         rd_reg  THR_REG
 
-        mov     edi, [esi + port.rx_buf + RING_BUF.write_ptr]
+        mov     edi, [esi + drv_data.rx_buf + RING_BUF.write_ptr]
         inc     edi
-        cmp     edi, [esi + port.rx_buf + RING_BUF.end_ptr]
+        cmp     edi, [esi + drv_data.rx_buf + RING_BUF.end_ptr]
         jnz     @f
-        mov     edi, [esi + port.rx_buf + RING_BUF.start_ptr]
+        mov     edi, [esi + drv_data.rx_buf + RING_BUF.start_ptr]
   @@:
-        cmp     edi, [esi + port.rx_buf + RING_BUF.read_ptr]
+        cmp     edi, [esi + drv_data.rx_buf + RING_BUF.read_ptr]
         jnz     .put_byte
 
         ; TODO: Overflow. Read all bytes from uart and exit
@@ -346,10 +353,10 @@ proc int_handler c uses ebx esi edi, desc:dword
 
   .put_byte:
         push    edi
-        mov     edi, [esi + port.rx_buf + RING_BUF.write_ptr]
+        mov     edi, [esi + drv_data.rx_buf + RING_BUF.write_ptr]
         mov     byte [edi], al
         pop     edi
-        mov     [esi + port.rx_buf + RING_BUF.write_ptr], edi
+        mov     [esi + drv_data.rx_buf + RING_BUF.write_ptr], edi
 
   .skip:
         ; check for more recevied bytes
@@ -370,10 +377,10 @@ proc int_handler c uses ebx esi edi, desc:dword
         ret
 endp
 
-proc drv_startup stdcall, desc:dword
-        DEBUGF  L_DBG, "serial.sys: open 0x%x\n", [desc]
-        mov     ecx, [desc]
-        mov     edx, [ecx + port.io_addr]
+proc drv_startup stdcall, data:dword
+        DEBUGF  L_DBG, "serial.sys: open 0x%x\n", [data]
+        mov     ecx, [data]
+        mov     edx, [ecx + drv_data.io_addr]
 
         mov     ax, 12 ; 9600
         call    uart_set_baud
@@ -391,20 +398,30 @@ proc drv_startup stdcall, desc:dword
         ret
 endp
 
-proc drv_shutdown stdcall, desc:dword
-        DEBUGF  L_DBG, "serial.sys: close 0x%x\n", [desc]
+proc drv_shutdown stdcall, data:dword
+        DEBUGF  L_DBG, "serial.sys: close 0x%x\n", [data]
         ; disable interrupts
-        mov     ecx, [desc]
-        mov     edx, [ecx + port.io_addr]
+        mov     ecx, [data]
+        mov     edx, [ecx + drv_data.io_addr]
         xor     ax, ax
         wr_reg  IER_REG
         ret
 endp
 
-proc drv_start_tx stdcall, desc:dword
-        DEBUGF  L_DBG, "serial.sys: start_tx 0x%x\n", [desc]
-        mov     ecx, [desc]
-        mov     edx, [ecx + port.io_addr]
+proc drv_read stdcall, data, dst, size
+        DEBUGF  L_DBG, "serial.sys: read %d bytes from port 0x%x\n", [size], [data]
+        ret
+endp
+
+proc drv_write stdcall, data, src, size
+        DEBUGF  L_DBG, "serial.sys: write %d bytes to port 0x%x\n", [size], [data]
+        ret
+endp
+
+proc drv_start_tx stdcall, data:dword
+        DEBUGF  L_DBG, "serial.sys: start_tx 0x%x\n", [data]
+        mov     ecx, [data]
+        mov     edx, [ecx + drv_data.io_addr]
         spin_lock_irqsave
         rd_reg  IER_REG
         or      ax, IER_THRI
@@ -413,46 +430,7 @@ proc drv_start_tx stdcall, desc:dword
         ret
 endp
 
-proc drv_stop_tx stdcall, desc:dword
-        DEBUGF  L_DBG, "serial.sys: stop_tx 0x%x\n", [desc]
-        mov     ecx, [desc]
-        mov     edx, [ecx + port.io_addr]
-        spin_lock_irqsave
-        rd_reg  IER_REG
-        and     ax, not IER_THRI
-        wr_reg  IER_REG
-        spin_unlock_irqrestore
-        ret
-endp
-
-proc drv_read_sr stdcall, desc:dword
-        mov     ecx, [desc]
-        mov     edx, [ecx + port.io_addr]
-        rd_reg  LSR_REG
-        shl     ax, 8
-        rd_reg  MSR_REG
-        mov     dx, ax
-        xor     eax, eax
-        test    dh, LSR_DR shl 8
-        jz      @f
-        or      eax, SERIAL_SR_RXNE
-  @@:
-        test    dh, LSR_THRE
-        jz      @f
-        or      eax, SERIAL_SR_TXE
-  @@:
-        ret
-endp
-
-proc drv_read_dr stdcall, desc:dword
-        mov     ecx, [desc]
-        mov     edx, [ecx + port.io_addr]
-        xor     eax, eax
-        rd_reg  THR_REG
-        ret
-endp
-
-version     dd  0x0000001
+version     dd  API_VERSION
 drv_name    db 'SERIAL', 0
 
 align 4
@@ -460,8 +438,8 @@ drv_funcs:
         dd drv_funcs_end - drv_funcs
         dd drv_startup
         dd drv_shutdown
-        dd drv_start_tx
-        dd drv_stop_tx
+        dd drv_read
+        dd drv_write
 drv_funcs_end:
 
 include_debug_strings

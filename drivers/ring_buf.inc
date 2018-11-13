@@ -5,13 +5,21 @@
 ;;                                                              ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+struct  RING_BUF
+        start_ptr       dd ?   ; Pointer to start of buffer
+        end_ptr         dd ?   ; Pointer to end of buffer
+        read_ptr        dd ?   ; Read pointer
+        write_ptr       dd ?   ; Write pointer
+        size            dd ?   ; Size of buffer
+ends
+
 ;bool __fastcall ring_buf_create(struct RING_BUF *buf, u32 pages)
 align 4
 proc ring_buf_create
         shl     edx, 12
         push    ecx
         push    edx
-        stdcall create_ring_buffer, edx, PG_SWR
+        invoke  CreateRingBuffer, edx, 0x003 ; PG_WRITE + PG_READ
         pop     edx
         pop     ecx
         test    eax, eax
@@ -38,7 +46,7 @@ proc ring_buf_destroy
         mov     [ecx + RING_BUF.end_ptr], eax
         mov     [ecx + RING_BUF.size], eax
         xchg    eax, [ecx + RING_BUF.start_ptr]
-        stdcall kernel_free, eax
+        invoke  Kfree, eax
         ret
 endp
 

@@ -26,7 +26,6 @@ include "core/irq.inc"          ; interrupt handling functions
 include "core/apic.inc"
 include "core/timers.inc"
 include "core/clipboard.inc"
-include "core/ring_buf.inc"
 
 include "posix/posix.inc"
 
